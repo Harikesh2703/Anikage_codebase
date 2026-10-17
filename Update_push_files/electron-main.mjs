@@ -291,8 +291,8 @@ async function fetchRemoteVersion() {
       app_url: "https://github.com/Harikesh2703/Anikage_Updates/releases/download/v1.1.0/Anikage_Setup.exe",
       
       scraper_version: "1.0.5",
-      scraper_changelog: "Scraper Hot-Fix: Fixes AllAnime streaming URL extractor and handles dynamic JavaScript obfuscation.",
-      scraper_url: "https://raw.githubusercontent.com/Harikesh2703/Anikage_Updates/main/allanime.js",
+      scraper_changelog: "Scraper Hot-Fix: Fixes HiAnime streaming URL extractor and handles dynamic JavaScript obfuscation.",
+      scraper_url: "https://raw.githubusercontent.com/Harikesh2703/Anikage_Updates/main/hianime.js",
       
       ui_version: "1.0.2",
       ui_changelog: "UI Design Update: Adds glassmorphism notification panel, smooth slide animations, and update progress indicators.",
@@ -318,7 +318,7 @@ async function installPatchInternal({ url, type = 'scraper', version }) {
     writeLog(`[Update] Starting hot-patch download. Type: ${type}, URL: ${url}, Version: ${version}`);
 
     if (type === 'scraper') {
-      const patchPath = path.join(patchesDir, 'allanime.js');
+      const patchPath = path.join(patchesDir, 'hianime.js');
       if (!fs.existsSync(patchesDir)) fs.mkdirSync(patchesDir, { recursive: true });
 
       try {
@@ -326,13 +326,13 @@ async function installPatchInternal({ url, type = 'scraper', version }) {
         if (!response.ok) throw new Error(`Download failed: ${response.statusText}`);
         const code = await response.text();
         
-        if (!code.includes('class AllAnimeAPI') && !code.includes('AllAnime')) {
+        if (!code.includes('class HiAnimeAPI') && !code.includes('HiAnime')) {
           throw new Error('Downloaded file appears to be an invalid scraper.');
         }
         fs.writeFileSync(patchPath, code);
       } catch (fetchErr) {
         writeLog(`[Update Warning] Fetching patch URL failed: ${fetchErr.message}. Simulating local patch creation for offline testing...`);
-        fs.writeFileSync(patchPath, `// Mock patched AllAnime API v${version}\nclass AllAnimeAPI {}`);
+        fs.writeFileSync(patchPath, `// Mock patched HiAnime API v${version}\nclass HiAnimeAPI {}`);
       }
       
       await updateLocalConfig('scraper_version', version);
@@ -513,7 +513,7 @@ async function checkForUpdates(window) {
 
     // Scraper Update
     if (remoteData.scraper_version > localConfig.scraper_version) {
-      const url = remoteData.scraper_url || 'https://raw.githubusercontent.com/Harikesh2703/Anikage_Updates/main/allanime.js';
+      const url = remoteData.scraper_url || 'https://raw.githubusercontent.com/Harikesh2703/Anikage_Updates/main/hianime.js';
       writeLog(`[Update] Scraper update found: ${remoteData.scraper_version}`);
       window.webContents.send('update-available', {
         type: 'scraper',
@@ -640,7 +640,7 @@ ipcMain.handle('get-available-patches', async () => {
     }
 
     if (remoteData.scraper_version > localConfig.scraper_version) {
-      const url = remoteData.scraper_url || 'https://raw.githubusercontent.com/Harikesh2703/Anikage_Updates/main/allanime.js';
+      const url = remoteData.scraper_url || 'https://raw.githubusercontent.com/Harikesh2703/Anikage_Updates/main/hianime.js';
       pending.push({
         id: `update-scraper-${remoteData.scraper_version}`,
         type: 'scraper',
@@ -730,7 +730,7 @@ ipcMain.handle('auto-install-patches', async () => {
         }
 
         if (type === 'scraper') {
-          const patchPath = path.join(patchesDir, 'allanime.js');
+          const patchPath = path.join(patchesDir, 'hianime.js');
           const response = await fetch(url);
           if (!response.ok) throw new Error('Download failed');
           const code = await response.text();
@@ -777,7 +777,7 @@ ipcMain.handle('auto-install-patches', async () => {
         // Fallback for offline testing
         writeLog(`[Update Warning] Auto-installing patch of type ${type} failed. Simulating local creation...`);
         if (type === 'scraper') {
-          const patchPath = path.join(patchesDir, 'allanime.js');
+          const patchPath = path.join(patchesDir, 'hianime.js');
           fs.writeFileSync(patchPath, `// Simulated patch v${version}`);
           await updateLocalConfig('scraper_version', version);
         } else if (type === 'ui' || type === 'server') {
@@ -796,7 +796,7 @@ ipcMain.handle('auto-install-patches', async () => {
     };
 
     if (remoteData.scraper_version > localConfig.scraper_version) {
-      await applyPatch('scraper', remoteData.scraper_version, remoteData.scraper_url || 'https://raw.githubusercontent.com/Harikesh2703/Anikage_Updates/main/allanime.js');
+      await applyPatch('scraper', remoteData.scraper_version, remoteData.scraper_url || 'https://raw.githubusercontent.com/Harikesh2703/Anikage_Updates/main/hianime.js');
     }
     if (remoteData.ui_version > localConfig.ui_version) {
       await applyPatch('ui', remoteData.ui_version, remoteData.ui_url || 'https://raw.githubusercontent.com/Harikesh2703/Anikage_Updates/main/ui-patch.zip');

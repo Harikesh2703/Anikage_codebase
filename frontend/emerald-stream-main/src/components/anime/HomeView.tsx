@@ -8,9 +8,10 @@ import type { AnimeItem } from '@/lib/api';
 
 interface HomeViewProps {
   onCardClick?: (anime: AnimeItem) => void;
+  playerOpen?: boolean;
 }
 
-export function HomeView({ onCardClick }: HomeViewProps) {
+export function HomeView({ onCardClick, playerOpen }: HomeViewProps) {
   const [hero, setHero] = useState<AnimeItem[]>([]);
   const [trending, setTrending] = useState<AnimeItem[]>([]);
   const [shonen, setShonen] = useState<AnimeItem[]>([]);
@@ -25,32 +26,23 @@ export function HomeView({ onCardClick }: HomeViewProps) {
 
     async function load() {
       try {
-        const all = await api.trending({ limit: 30 });
+        const [trendList, actionList, solList, fantasyList, historyList] = await Promise.all([
+          api.trending({ limit: 20 }),
+          api.trending({ limit: 16, genre: 'Action' }),
+          api.trending({ limit: 16, genre: 'Slice of Life' }),
+          api.trending({ limit: 16, genre: 'Fantasy' }),
+          api.history().catch(() => [])
+        ]);
+
         if (cancelled) return;
 
-        const heroSlides = all.filter(a => a.banner && a.banner !== a.coverImage).slice(0, 3);
-        const trendRow = all.slice(0, 14);
+        const heroSlides = trendList.filter(a => a.banner && a.banner !== a.coverImage).slice(0, 5);
 
-        const shonenList = all
-          .filter(a => a.tags.some(t => ['Shounen', 'Action', 'Adventure'].includes(t)))
-          .slice(0, 12);
-
-        const solList = all
-          .filter(a => a.tags.some(t => t.toLowerCase().includes('slice')))
-          .slice(0, 12);
-
-        const sciFiList = all
-          .filter(a => a.tags.some(t => ['Sci-Fi', 'Mecha', 'Fantasy', 'Supernatural'].includes(t)))
-          .slice(0, 12);
-
-        const historyList = await api.history();
-        if (cancelled) return;
-
-        setHero(heroSlides.length >= 2 ? heroSlides : trendRow.slice(0, 3));
-        setTrending(trendRow);
-        setShonen(shonenList.length > 2 ? shonenList : trendRow.slice(0, 8));
-        setSliceOfLife(solList.length > 2 ? solList : trendRow.slice(2, 10));
-        setSciFi(sciFiList.length > 2 ? sciFiList : trendRow.slice(4, 12));
+        setHero(heroSlides.length >= 2 ? heroSlides : trendList.slice(0, 3));
+        setTrending(trendList);
+        setShonen(actionList);
+        setSliceOfLife(solList);
+        setSciFi(fantasyList);
         setHistory(historyList);
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load');
@@ -62,6 +54,12 @@ export function HomeView({ onCardClick }: HomeViewProps) {
     load();
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (playerOpen === false) {
+      api.history().then(setHistory).catch(console.error);
+    }
+  }, [playerOpen]);
 
   if (loading) {
     return (
@@ -91,7 +89,10 @@ export function HomeView({ onCardClick }: HomeViewProps) {
 
       <div className="-mt-12 relative z-10">
         {history.length > 0 && (
-          <AnimeRow title="Continue Watching" subtitle="Resume where you left off">
+          <AnimeRow 
+            title="Continue Watching" 
+            subtitle="Resume where you left off"
+          >
             {history.map((item) => (
               <AnimeCard key={item.id} anime={item} onCardClick={onCardClick} />
             ))}

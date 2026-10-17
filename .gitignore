@@ -34,3 +34,20 @@ Thumbs.db
 
 # Lock files (keep package-lock.json but ignore bun)
 frontend/emerald-stream-main/bun.lockb
+
+# Downloads & Media
+downloads/
+*.mp4
+*.mkv
+*.webm
+
+# APKs & Android build artifacts
+*.apk
+*.li
+anikage-android/.gradle/
+anikage-android/build/
+anikage-android/app/build/
+anikage-android/.android/
+anikage-android/.idea/
+anikage/
+scrapers_for_upload/

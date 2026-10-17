@@ -1,0 +1,11 @@
+--- app/build.gradle.kts
++++ app/build.gradle.kts
+@@ -104,7 +104,7 @@
+   implementation("androidx.room:room-runtime:$roomVersion")
+   implementation("androidx.room:room-ktx:$roomVersion")
+   kapt("androidx.room:room-compiler:$roomVersion")
+-  kapt("org.jetbrains.kotlinx:kotlinx-metadata-jvm:0.9.0")
++  kapt("org.jetbrains.kotlin:kotlin-metadata-jvm:2.3.20")
+   
+   // Gson for Export/Import serialization
+   implementation("com.google.code.gson:gson:2.10.1")

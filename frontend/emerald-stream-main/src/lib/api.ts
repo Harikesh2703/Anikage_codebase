@@ -13,10 +13,18 @@ export interface AnimeItem {
   type?: string;
 }
 
+export interface Subtitle {
+  label: string;
+  url: string;
+  default?: boolean;
+}
+
 export interface StreamSource {
   url: string;
   quality: string;
   provider: string;
+  subtitles?: Subtitle[];
+  headers?: Record<string, string>;
 }
 
 export interface StreamResponse {
@@ -51,11 +59,19 @@ export const api = {
     return get<AnimeItem[]>(`/trending?${params.toString()}`);
   },
 
-  episodes: (showId: string) =>
-    get<string[]>(`/episodes/${showId}`),
+  episodes: (showId: string, title?: string) => {
+    const params = new URLSearchParams();
+    if (title) params.set('title', title);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    return get<string[]>(`/episodes/${encodeURIComponent(showId)}${qs}`);
+  },
 
-  stream: (showId: string, episode: string) =>
-    get<StreamResponse>(`/sources/${showId}/${episode}`),
+  stream: (showId: string, episode: string, title?: string) => {
+    const params = new URLSearchParams();
+    if (title) params.set('title', title);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    return get<StreamResponse>(`/sources/${encodeURIComponent(showId)}/${encodeURIComponent(episode)}${qs}`);
+  },
 
   history: () =>
     get<AnimeItem[]>(`/history`),
@@ -112,5 +128,11 @@ export const api = {
       return window.electron.invoke('get-local-versions');
     }
     return Promise.resolve({ app: '1.0.0', scraper: '1.0.0', ui: '1.0.0', server: '1.0.0' });
-  }
+  },
+
+  getPlugins: () => 
+    get<any[]>(`/plugins`),
+    
+  setActivePlugin: (id: string) => 
+    post<{ success: boolean; activePlugin: string }>(`/plugins/active`, { id }),
 };

@@ -1,0 +1,18 @@
+package com.anikage.ui.theme
+
+import androidx.compose.ui.graphics.Color
+
+// 1.1 Color Palette tokens strictly derived from DESIGN.md
+val Primary = Color(0xFF10B981)          // Emerald Green: main CTAs, active states
+val PrimaryVariant = Color(0xFF059669)   // Hover/Pressed state for buttons
+val Secondary = Color(0xFF8B5CF6)        // Vibrant Purple: tags, badges
+val Background = Color(0xFF0F172A)       // Dark Slate: main app background
+val Surface = Color(0xFF1E293B)          // Dark Surface: cards, sheets, dialogs
+val SurfaceVariant = Color(0xFF334155)   // Muted Slate: search bars, inputs, chips
+val Error = Color(0xFFEF4444)            // Crimson Red: destructive actions, alerts
+
+val OnPrimary = Color(0xFFFFFFFF)
+val OnSecondary = Color(0xFFFFFFFF)
+val OnBackground = Color(0xFFF8FAFC)     // High-contrast off-white: headers & main text
+val OnSurface = Color(0xFFE2E8F0)        // Secondary text, subtitles
+val OnSurfaceVariant = Color(0xFF94A3B8) // Placeholder text, disabled text, unselected icons

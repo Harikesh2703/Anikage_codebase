@@ -1,3 +1,4 @@
+import { downloadManager } from './server/downloadManager.mjs';
 import { app, BrowserWindow, utilityProcess, ipcMain, dialog } from 'electron';
 app.name = 'Anikage';
 import path from 'path';
@@ -149,13 +150,10 @@ function createWindow() {
     });
   }
 
-  const patchUiPath = path.join(userDataPath, 'patches/ui/index.html');
-
+  const distUiPath = path.join(__dirname, 'frontend/emerald-stream-main/dist/index.html');
   const startUrl = isDev 
     ? 'http://localhost:8080' 
-    : (fs.existsSync(patchUiPath)
-        ? patchUiPath
-        : path.join(__dirname, 'frontend/emerald-stream-main/dist/index.html'));
+    : distUiPath;
 
   const waitForServer = async (retries = 20) => {
     writeLog('[Main] Probing backend server on port 3001...');
@@ -203,21 +201,18 @@ function createWindow() {
       writeLog(`[Main] Loading URL: ${startUrl}`);
       mainWindow.loadURL(startUrl);
     } else {
-      const absoluteDistPath = fs.existsSync(patchUiPath)
-        ? patchUiPath
-        : path.resolve(__dirname, 'frontend/emerald-stream-main/dist/index.html');
-      writeLog(`[Main] Loading frontend from: ${absoluteDistPath}`);
-      mainWindow.loadFile(absoluteDistPath).catch(err => writeLog(`[LOAD ERROR] ${err.message}`));
+      writeLog(`[Main] Loading frontend from: ${distUiPath}`);
+      mainWindow.loadFile(distUiPath).catch(err => writeLog(`[LOAD ERROR] ${err.message}`));
     }
     
     writeLog(`[Main] Total frontend load sequence took ${Date.now() - startTime}ms.`);
 
     // Background Update Check (ONLY after page is loaded)
     mainWindow.webContents.once('did-finish-load', () => {
-      writeLog('[Main] Page finished loading. Scheduling update check...');
-      setTimeout(() => {
-        checkForUpdates(mainWindow);
-      }, 5000);
+      writeLog('[Main] Page finished loading. Auto-updates disabled.');
+      // setTimeout(() => {
+      //   checkForUpdates(mainWindow);
+      // }, 5000);
     });
   };
 
@@ -285,7 +280,7 @@ ipcMain.handle('factory-reset', async () => {
 // Helper to fetch remote version with offline mock fallback
 async function fetchRemoteVersion() {
   try {
-    const response = await fetch('https://raw.githubusercontent.com/Harikesh2703/Anikage_Updates/main/version.json');
+    const response = await fetch('http://localhost:4000/api/check-update');
     if (response.ok) {
       return await response.json();
     }
@@ -298,8 +293,8 @@ async function fetchRemoteVersion() {
       app_url: "https://github.com/Harikesh2703/Anikage_Updates/releases/download/v1.1.0/Anikage_Setup.exe",
       
       scraper_version: "1.0.5",
-      scraper_changelog: "Scraper Hot-Fix: Fixes AllAnime streaming URL extractor and handles dynamic JavaScript obfuscation.",
-      scraper_url: "https://raw.githubusercontent.com/Harikesh2703/Anikage_Updates/main/allanime.js",
+      scraper_changelog: "Scraper Hot-Fix: Fixes HiAnime streaming URL extractor and handles dynamic JavaScript obfuscation.",
+      scraper_url: "https://raw.githubusercontent.com/Harikesh2703/Anikage_Updates/main/hianime.js",
       
       ui_version: "1.0.2",
       ui_changelog: "UI Design Update: Adds glassmorphism notification panel, smooth slide animations, and update progress indicators.",
@@ -324,29 +319,7 @@ async function installPatchInternal({ url, type = 'scraper', version }) {
 
     writeLog(`[Update] Starting hot-patch download. Type: ${type}, URL: ${url}, Version: ${version}`);
 
-    if (type === 'scraper') {
-      const patchPath = path.join(patchesDir, 'allanime.js');
-      if (!fs.existsSync(patchesDir)) fs.mkdirSync(patchesDir, { recursive: true });
-
-      try {
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(`Download failed: ${response.statusText}`);
-        const code = await response.text();
-        
-        if (!code.includes('class AllAnimeAPI') && !code.includes('AllAnime')) {
-          throw new Error('Downloaded file appears to be an invalid scraper.');
-        }
-        fs.writeFileSync(patchPath, code);
-      } catch (fetchErr) {
-        writeLog(`[Update Warning] Fetching patch URL failed: ${fetchErr.message}. Simulating local patch creation for offline testing...`);
-        fs.writeFileSync(patchPath, `// Mock patched AllAnime API v${version}\nclass AllAnimeAPI {}`);
-      }
-      
-      await updateLocalConfig('scraper_version', version);
-      return { success: true };
-    } 
-    
-    else if (type === 'ui') {
+    if (type === 'ui') {
       const uiDir = path.join(patchesDir, 'ui');
       if (fs.existsSync(uiDir)) fs.rmSync(uiDir, { recursive: true, force: true });
       fs.mkdirSync(uiDir, { recursive: true });
@@ -508,17 +481,7 @@ async function checkForUpdates(window) {
       }, 4000);
     }
 
-    // Scraper Update
-    if (remoteData.scraper_version > localConfig.scraper_version) {
-      const url = remoteData.scraper_url || 'https://raw.githubusercontent.com/Harikesh2703/Anikage_Updates/main/allanime.js';
-      writeLog(`[Update] Scraper update found: ${remoteData.scraper_version}`);
-      window.webContents.send('update-available', {
-        type: 'scraper',
-        version: remoteData.scraper_version,
-        changelog: remoteData.scraper_changelog || remoteData.changelog || 'Scraper logic updates',
-        url: url
-      });
-    }
+
 
     // UI Update
     if (remoteData.ui_version > localConfig.ui_version) {
@@ -609,6 +572,74 @@ ipcMain.handle('get-local-versions', () => {
   return {};
 });
 
+// Download Manager Integration
+
+
+// Relay events from the download manager to the renderer
+downloadManager.on('progress', (data) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('download-progress', data);
+  }
+});
+downloadManager.on('completed', (data) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('download-completed', data);
+  }
+});
+downloadManager.on('error', (data) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('download-error', data);
+  }
+});
+downloadManager.on('canceled', (data) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('download-canceled', data);
+  }
+});
+
+ipcMain.handle('start-download', async (event, { id, videoUrl, subtitleUrl, title, headers }) => {
+  try {
+    writeLog(`[Download] Starting download: ${title}`);
+    await downloadManager.startDownload(id, videoUrl, subtitleUrl, title, headers);
+    return { success: true };
+  } catch (err) {
+    writeLog(`[Download ERROR] ${err.message}`);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('cancel-download', async (event, { id }) => {
+  try {
+    const success = downloadManager.cancelDownload(id);
+    return { success };
+  } catch (err) {
+    writeLog(`[Download ERROR] ${err.message}`);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('get-downloads', async () => {
+  return downloadManager.getDownloads();
+});
+
+ipcMain.handle('dismiss-failed-download', async (event, { id }) => {
+  return downloadManager.clearFailedDownload(id);
+});
+
+ipcMain.handle('delete-download', async (event, { id }) => {
+  const success = downloadManager.deleteDownload(id);
+  return { success };
+});
+
+ipcMain.handle('read-local-file', async (event, filePath) => {
+  try {
+    const data = fs.readFileSync(filePath, 'utf-8');
+    return { success: true, data };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
 // Expose get-available-patches handler for React frontend API
 ipcMain.handle('get-available-patches', async () => {
   try {
@@ -637,7 +668,7 @@ ipcMain.handle('get-available-patches', async () => {
     }
 
     if (remoteData.scraper_version > localConfig.scraper_version) {
-      const url = remoteData.scraper_url || 'https://raw.githubusercontent.com/Harikesh2703/Anikage_Updates/main/allanime.js';
+      const url = remoteData.scraper_url || 'https://raw.githubusercontent.com/Harikesh2703/Anikage_Updates/main/hianime.js';
       pending.push({
         id: `update-scraper-${remoteData.scraper_version}`,
         type: 'scraper',
@@ -727,7 +758,7 @@ ipcMain.handle('auto-install-patches', async () => {
         }
 
         if (type === 'scraper') {
-          const patchPath = path.join(patchesDir, 'allanime.js');
+          const patchPath = path.join(patchesDir, 'hianime.js');
           const response = await fetch(url);
           if (!response.ok) throw new Error('Download failed');
           const code = await response.text();
@@ -774,7 +805,7 @@ ipcMain.handle('auto-install-patches', async () => {
         // Fallback for offline testing
         writeLog(`[Update Warning] Auto-installing patch of type ${type} failed. Simulating local creation...`);
         if (type === 'scraper') {
-          const patchPath = path.join(patchesDir, 'allanime.js');
+          const patchPath = path.join(patchesDir, 'hianime.js');
           fs.writeFileSync(patchPath, `// Simulated patch v${version}`);
           await updateLocalConfig('scraper_version', version);
         } else if (type === 'ui' || type === 'server') {
@@ -793,7 +824,7 @@ ipcMain.handle('auto-install-patches', async () => {
     };
 
     if (remoteData.scraper_version > localConfig.scraper_version) {
-      await applyPatch('scraper', remoteData.scraper_version, remoteData.scraper_url || 'https://raw.githubusercontent.com/Harikesh2703/Anikage_Updates/main/allanime.js');
+      await applyPatch('scraper', remoteData.scraper_version, remoteData.scraper_url || 'https://raw.githubusercontent.com/Harikesh2703/Anikage_Updates/main/hianime.js');
     }
     if (remoteData.ui_version > localConfig.ui_version) {
       await applyPatch('ui', remoteData.ui_version, remoteData.ui_url || 'https://raw.githubusercontent.com/Harikesh2703/Anikage_Updates/main/ui-patch.zip');

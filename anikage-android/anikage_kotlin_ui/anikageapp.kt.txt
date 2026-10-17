@@ -1,0 +1,92 @@
+package com.anikage.ui
+
+import android.content.res.Configuration
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Scaffold
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
+import com.anikage.ui.components.AnikageNavDestination
+import com.anikage.ui.components.AnikageTopAppBar
+import com.anikage.ui.screens.*
+import com.anikage.ui.theme.AnikageTheme
+
+/**
+ * Main application scaffold managing the persistent Top Bar and NavHost routes.
+ */
+@Composable
+fun AnikageApp(
+    modifier: Modifier = Modifier
+) {
+    val navController = rememberNavController()
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route ?: AnikageNavDestination.Home.route
+
+    val currentDestination = remember(currentRoute) {
+        AnikageNavDestination.values().find { it.route == currentRoute } ?: AnikageNavDestination.Home
+    }
+
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        topBar = {
+            AnikageTopAppBar(
+                currentDestination = currentDestination,
+                onNavigate = { destination ->
+                    navController.navigate(destination.route) {
+                        popUpTo(AnikageNavDestination.Home.route) {
+                            saveState = true
+                        }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                }
+            )
+        }
+    ) { innerPadding ->
+        NavHost(
+            navController = navController,
+            startDestination = AnikageNavDestination.Home.route,
+            modifier = Modifier.padding(innerPadding)
+        ) {
+            composable(AnikageNavDestination.Home.route) {
+                HomeScreen()
+            }
+            composable(AnikageNavDestination.Search.route) {
+                var query by remember { mutableStateOf("") }
+                SearchScreen(
+                    query = query,
+                    onQueryChange = { query = it }
+                )
+            }
+            composable(AnikageNavDestination.MyList.route) {
+                var selectedTab by remember { mutableStateOf(0) }
+                MyListScreen(
+                    selectedTabIndex = selectedTab,
+                    onTabSelected = { selectedTab = it }
+                )
+            }
+            composable(AnikageNavDestination.Downloads.route) {
+                DownloadsScreen()
+            }
+            composable(AnikageNavDestination.Notifications.route) {
+                NotificationsScreen()
+            }
+            composable(AnikageNavDestination.Settings.route) {
+                SettingsScreen()
+            }
+        }
+    }
+}
+
+@Preview(uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+fun AnikageAppPreview() {
+    AnikageTheme {
+        AnikageApp()
+    }
+}

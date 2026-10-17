@@ -3,6 +3,7 @@ import { AnalyticsView } from '@/components/anime/AnalyticsView';
 import { NotificationsView, type AppNotification } from '@/components/anime/NotificationsView';
 import { SettingsView } from '@/components/anime/SettingsView';
 import { HomeView } from '@/components/anime/HomeView';
+import { DownloadsView } from '@/components/anime/DownloadsView';
 import { Navbar } from '@/components/anime/Navbar';
 import { EpisodeModal } from '@/components/anime/EpisodeModal';
 import { VideoPlayer } from '@/components/anime/VideoPlayer';
@@ -200,7 +201,7 @@ export function AnimeApp() {
     setSourceIndex(0);
     setCurrentEpisode(episode);
     try {
-      const response = await api.stream(anime.id, episode);
+      const response = await api.stream(anime.id, episode, anime.title);
       if (!response.sources || response.sources.length === 0) throw new Error('No stream sources found.');
       
       // Helper to extract numeric quality for sorting
@@ -232,10 +233,19 @@ export function AnimeApp() {
       // Sort and FILTER sources by quality and validity
       const validSortedSources = [...response.sources]
         .filter(s => isValidUrl(s.url))
-        .sort((a, b) => getQualityScore(b.quality) - getQualityScore(a.quality));
+        .sort((a, b) => getQualityScore(b.quality) - getQualityScore(a.quality))
+        .map(source => ({
+            ...source,
+            subtitles: source.subtitles?.map((sub: any) => ({
+                ...sub,
+                label: sub.lang || sub.label || 'English',
+                url: `http://127.0.0.1:3001/api/proxy?url=${encodeURIComponent(sub.url)}${source.headers?.referer ? `&referer=${encodeURIComponent(source.headers.referer)}` : ''}`
+            }))
+        }));
 
       if (validSortedSources.length === 0) throw new Error('No playable stream sources found.');
 
+      console.log('Valid Sorted Sources:', validSortedSources);
       setSources(validSortedSources);
       setSourceIndex(0);
       
@@ -248,7 +258,10 @@ export function AnimeApp() {
         firstSource.url.includes('googlevideo.com');
       
       if (isDirectVideo) {
-        const proxiedUrl = `http://127.0.0.1:3001/api/proxy?url=${encodeURIComponent(firstSource.url)}`;
+        let proxiedUrl = `http://127.0.0.1:3001/api/proxy?url=${encodeURIComponent(firstSource.url)}`;
+        if (firstSource.headers?.referer) {
+            proxiedUrl += `&referer=${encodeURIComponent(firstSource.headers.referer)}`;
+        }
         setStreamUrl(proxiedUrl);
       } else {
         setStreamUrl(firstSource.url);
@@ -282,7 +295,10 @@ export function AnimeApp() {
       nextSource.url.includes('googlevideo.com');
 
     if (isDirectVideo) {
-      const proxiedUrl = `http://127.0.0.1:3001/api/proxy?url=${encodeURIComponent(nextSource.url)}`;
+      let proxiedUrl = `http://127.0.0.1:3001/api/proxy?url=${encodeURIComponent(nextSource.url)}`;
+      if (nextSource.headers?.referer) {
+          proxiedUrl += `&referer=${encodeURIComponent(nextSource.headers.referer)}`;
+      }
       setStreamUrl(proxiedUrl);
     } else {
       setStreamUrl(nextSource.url);
@@ -304,7 +320,10 @@ export function AnimeApp() {
       nextSource.url.includes('googlevideo.com');
 
     if (isDirectVideo) {
-      const proxiedUrl = `http://127.0.0.1:3001/api/proxy?url=${encodeURIComponent(nextSource.url)}`;
+      let proxiedUrl = `http://127.0.0.1:3001/api/proxy?url=${encodeURIComponent(nextSource.url)}`;
+      if (nextSource.headers?.referer) {
+          proxiedUrl += `&referer=${encodeURIComponent(nextSource.headers.referer)}`;
+      }
       setStreamUrl(proxiedUrl);
     } else {
       setStreamUrl(nextSource.url);
@@ -345,7 +364,7 @@ export function AnimeApp() {
       />
 
       {view === 'home' && (
-        <HomeView onCardClick={openEpisodeModal} />
+        <HomeView onCardClick={openEpisodeModal} playerOpen={playerOpen} />
       )}
       
       {view === 'analytics' && (
@@ -386,6 +405,10 @@ export function AnimeApp() {
 
       {view === 'settings' && (
         <SettingsView notifications={notifications} />
+      )}
+      
+      {view === 'downloads' && (
+        <DownloadsView />
       )}
 
       {/* Episode picker modal */}

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Search, Home, BarChart3, Bell, X, Loader2, Settings } from 'lucide-react';
+import { Search, Home, BarChart3, Bell, X, Loader2, Settings, Download } from 'lucide-react';
 import type { AppView } from '@/components/anime/types';
 import { api } from '@/lib/api';
 import type { AnimeItem } from '@/lib/api';
@@ -119,6 +119,9 @@ export function Navbar({ view, onNavigate, onCardClick, hasNotifications }: Navb
           </NavIcon>
           <NavIcon label="Analytics" active={view === 'analytics'} onClick={() => onNavigate('analytics')}>
             <BarChart3 className="w-5 h-5" />
+          </NavIcon>
+          <NavIcon label="Downloads" active={view === 'downloads'} onClick={() => onNavigate('downloads')}>
+            <Download className="w-5 h-5" />
           </NavIcon>
           <NavIcon 
             label="Notifications" 

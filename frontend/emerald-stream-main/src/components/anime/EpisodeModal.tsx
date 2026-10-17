@@ -15,11 +15,11 @@ export function EpisodeModal({ anime, onClose, onWatch }: EpisodeModalProps) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.episodes(anime.id)
+    api.episodes(anime.id, anime.title)
       .then(eps => setEpisodes(eps))
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
-  }, [anime.id]);
+  }, [anime.id, anime.title]);
 
   return (
     <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center"

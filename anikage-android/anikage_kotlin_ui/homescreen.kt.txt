@@ -1,0 +1,328 @@
+package com.anikage.ui.screens
+
+import android.content.res.Configuration
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.*
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.anikage.ui.components.AnimeItem
+import com.anikage.ui.components.AnimePosterCard
+import com.anikage.ui.components.ContinueWatchingCard
+import com.anikage.ui.components.GenreChip
+import com.anikage.ui.theme.AnikageSpacing
+import com.anikage.ui.theme.AnikageTheme
+
+@Composable
+fun HomeScreen(
+    modifier: Modifier = Modifier,
+    onAnimeClick: (AnimeItem) -> Unit = {}
+) {
+    val continueWatching = listOf(
+        AnimeItem("1", "Toumei na Yoru ni ...", emptyList(), episodeInfo = "Episode 7"),
+        AnimeItem("2", "Ice Age Apocalypse...", emptyList(), episodeInfo = "Episode 13"),
+        AnimeItem("3", "Hidarik...", emptyList(), episodeInfo = "Episode 1")
+    )
+
+    val animeCatalog = listOf(
+        AnimeItem("4", "1P", listOf("Action", "Adventure", "Comedy")),
+        AnimeItem("5", "BLEACH", listOf("Action", "Adventure", "Comedy")),
+        AnimeItem("6", "Tensei Shitara Sli...", listOf("Action", "Adventure")),
+        AnimeItem("7", "Mushoku Tensei II...", listOf("Adventure", "Drama", "Ecchi")),
+        AnimeItem("8", "NARUTO", listOf("Action", "Adventure"))
+    )
+
+    LazyColumn(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+        contentPadding = PaddingValues(bottom = AnikageSpacing.ExtraLarge)
+    ) {
+        // Spotlight / Hero Section
+        item {
+            HeroSpotlightSection(
+                onWatchNow = {},
+                onAddToList = {}
+            )
+        }
+
+        // Continue Watching Section
+        item {
+            SectionHeader(
+                title = "Continue Watching",
+                subtitle = "Resume where you left off"
+            )
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = AnikageSpacing.Medium),
+                horizontalArrangement = Arrangement.spacedBy(AnikageSpacing.Medium)
+            ) {
+                items(continueWatching) { item ->
+                    ContinueWatchingCard(anime = item, onClick = { onAnimeClick(item) })
+                }
+            }
+            Spacer(modifier = Modifier.height(AnikageSpacing.Large))
+        }
+
+        // Trending Now Section
+        item {
+            SectionHeader(
+                title = "Trending Now",
+                subtitle = "What everyone is watching"
+            )
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = AnikageSpacing.Medium),
+                horizontalArrangement = Arrangement.spacedBy(AnikageSpacing.Medium)
+            ) {
+                items(animeCatalog) { item ->
+                    AnimePosterCard(anime = item, onClick = { onAnimeClick(item) })
+                }
+            }
+            Spacer(modifier = Modifier.height(AnikageSpacing.Large))
+        }
+
+        // Shounen & Action Section
+        item {
+            SectionHeader(
+                title = "Shounen & Action",
+                subtitle = "The blades everyone is talking about"
+            )
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = AnikageSpacing.Medium),
+                horizontalArrangement = Arrangement.spacedBy(AnikageSpacing.Medium)
+            ) {
+                items(animeCatalog.reversed()) { item ->
+                    AnimePosterCard(anime = item, onClick = { onAnimeClick(item) })
+                }
+            }
+            Spacer(modifier = Modifier.height(AnikageSpacing.Large))
+        }
+
+        // Slice of Life Section
+        item {
+            SectionHeader(
+                title = "Slice of Life",
+                subtitle = "Slow afternoons, warm hearts"
+            )
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = AnikageSpacing.Medium),
+                horizontalArrangement = Arrangement.spacedBy(AnikageSpacing.Medium)
+            ) {
+                items(animeCatalog) { item ->
+                    AnimePosterCard(anime = item, onClick = { onAnimeClick(item) })
+                }
+            }
+            Spacer(modifier = Modifier.height(AnikageSpacing.Large))
+        }
+
+        // Fantasy & Supernatural Section
+        item {
+            SectionHeader(
+                title = "Fantasy & Supernatural",
+                subtitle = "Neon skies and ancient spirits"
+            )
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = AnikageSpacing.Medium),
+                horizontalArrangement = Arrangement.spacedBy(AnikageSpacing.Medium)
+            ) {
+                items(animeCatalog) { item ->
+                    AnimePosterCard(anime = item, onClick = { onAnimeClick(item) })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun HeroSpotlightSection(
+    onWatchNow: () -> Unit,
+    onAddToList: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(440.dp)
+            .background(Color(0xFF1E293B))
+    ) {
+        // Gradient overlay to fade smoothly into background
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            MaterialTheme.colorScheme.background.copy(alpha = 0.6f),
+                            MaterialTheme.colorScheme.background
+                        )
+                    )
+                )
+        )
+
+        // Hero Info Overlay
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(horizontal = AnikageSpacing.Medium, vertical = AnikageSpacing.Large)
+        ) {
+            // "• TRENDING NOW" badge
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary)
+                )
+                Text(
+                    text = "TRENDING NOW",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // Main Title
+            Text(
+                text = "BLEACH",
+                style = MaterialTheme.typography.displayLarge.copy(fontSize = 36.sp),
+                color = MaterialTheme.colorScheme.onBackground,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Genre Chips
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(AnikageSpacing.Small)
+            ) {
+                listOf("Action", "Adventure", "Comedy", "Super Power").forEach { genre ->
+                    GenreChip(name = genre)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Action Buttons
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Primary "Watch Now" Button
+                Button(
+                    onClick = onWatchNow,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ),
+                    shape = MaterialTheme.shapes.small,
+                    contentPadding = PaddingValues(horizontal = AnikageSpacing.Medium, vertical = AnikageSpacing.Small)
+                ) {
+                    Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Watch Now", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                }
+
+                // Secondary "+ My List" Button
+                OutlinedButton(
+                    onClick = onAddToList,
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.onBackground
+                    ),
+                    border = ButtonDefaults.outlinedButtonBorder.copy(
+                        brush = Brush.horizontalGradient(
+                            listOf(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.surfaceVariant)
+                        )
+                    ),
+                    shape = MaterialTheme.shapes.small,
+                    contentPadding = PaddingValues(horizontal = AnikageSpacing.Medium, vertical = AnikageSpacing.Small)
+                ) {
+                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("My List", style = MaterialTheme.typography.labelLarge)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Carousel Indicators & Pagination Controls
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.End
+            ) {
+                IconButton(onClick = {}, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Filled.ChevronLeft, contentDescription = "Previous", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Spacer(modifier = Modifier.width(4.dp))
+                Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant))
+                Spacer(modifier = Modifier.width(4.dp))
+                Box(modifier = Modifier.width(20.dp).height(6.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary))
+                Spacer(modifier = Modifier.width(4.dp))
+                Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant))
+                Spacer(modifier = Modifier.width(4.dp))
+                IconButton(onClick = {}, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Filled.ChevronRight, contentDescription = "Next", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SectionHeader(
+    title: String,
+    subtitle: String,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = AnikageSpacing.Medium, vertical = AnikageSpacing.Small)
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onBackground
+        )
+        Text(
+            text = subtitle,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Preview(uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+fun HomeScreenPreview() {
+    AnikageTheme {
+        HomeScreen()
+    }
+}

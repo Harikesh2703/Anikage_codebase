@@ -30,6 +30,7 @@ if (db) {
       cover_image TEXT,
       last_episode TEXT,
       genres TEXT,
+      provider TEXT,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE IF NOT EXISTS metadata_cache (
@@ -44,6 +45,10 @@ if (db) {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `);
+  // Try adding provider column if it doesn't exist
+  try {
+    db.exec(`ALTER TABLE watch_history ADD COLUMN provider TEXT`);
+  } catch (e) {}
 }
 
 export const db_helper = {
@@ -129,18 +134,19 @@ export const db_helper = {
   },
 
   // Add or update history
-  saveProgress: (animeId, title, coverImage, episode, genres) => {
+  saveProgress: (animeId, title, coverImage, episode, genres, provider) => {
     return new Promise((resolve, reject) => {
       try {
         const genresStr = Array.isArray(genres) ? genres.join(',') : genres;
         const sql = `
-          INSERT INTO watch_history (anime_id, title, cover_image, last_episode, genres, updated_at)
-          VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+          INSERT INTO watch_history (anime_id, title, cover_image, last_episode, genres, provider, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
           ON CONFLICT(anime_id) DO UPDATE SET
             last_episode = excluded.last_episode,
+            provider = COALESCE(excluded.provider, watch_history.provider),
             updated_at = CURRENT_TIMESTAMP
         `;
-        const info = db.prepare(sql).run(animeId, title, coverImage, episode, genresStr);
+        const info = db.prepare(sql).run(animeId, title, coverImage, episode, genresStr, provider || null);
         resolve(info.lastInsertRowid);
       } catch (err) {
         reject(err);
@@ -160,6 +166,7 @@ export const db_helper = {
           coverImage: row.cover_image,
           lastEpisode: row.last_episode,
           tags: row.genres ? row.genres.split(',') : [],
+          provider: row.provider || null,
           updatedAt: row.updated_at
         })));
       } catch (err) {
@@ -179,6 +186,19 @@ export const db_helper = {
           title: row.title,
           tags: row.genres ? row.genres.split(',') : [],
         })));
+      } catch (err) {
+        reject(err);
+      }
+    });
+  },
+
+  // Clear all watch history
+  clearHistory: () => {
+    return new Promise((resolve, reject) => {
+      try {
+        const sql = `DELETE FROM watch_history`;
+        db.prepare(sql).run();
+        resolve({ success: true });
       } catch (err) {
         reject(err);
       }

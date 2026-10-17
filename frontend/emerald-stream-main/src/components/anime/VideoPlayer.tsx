@@ -3,7 +3,7 @@ import Hls from 'hls.js';
 import {
   X, Play, Pause, Volume2, VolumeX, Maximize, Minimize,
   SkipBack, SkipForward, Loader2, ChevronLeft, ChevronRight,
-  RotateCcw, ShieldAlert, Server
+  RotateCcw, ShieldAlert, Server, Download, Check
 } from 'lucide-react';
 import type { StreamSource } from '@/lib/api';
 
@@ -46,12 +46,128 @@ export function VideoPlayer({
   const [availableQualities, setAvailableQualities] = useState<string[]>([]);
   const [currentQuality, setCurrentQuality] = useState('Auto');
   const [showSourceGuide, setShowSourceGuide] = useState(true);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [currentSubtitleLabel, setCurrentSubtitleLabel] = useState('Off');
+
+  useEffect(() => {
+    const subs = allSources?.[currentSourceIndex]?.subtitles || [];
+    if (subs.length > 0 && currentSubtitleLabel === 'Off') {
+      const defSub = subs.find(s => s.default) || 
+                     subs.find(s => s.label.toLowerCase().includes('english')) || 
+                     subs[0];
+      if (defSub) setCurrentSubtitleLabel(defSub.label);
+    }
+  }, [allSources, currentSourceIndex]);
 
   const currentEpIndex = totalEpisodes.indexOf(episode);
   const hasPrev = currentEpIndex > 0;
   const hasNext = currentEpIndex < totalEpisodes.length - 1;
 
   const isIframe = streamUrl && !streamUrl.includes('.m3u8') && !streamUrl.includes('.mp4') && !streamUrl.includes('/api/proxy');
+
+  const parsedCuesRef = useRef<{start: number, end: number, text: string}[]>([]);
+  const [activeSubtitleText, setActiveSubtitleText] = useState("");
+
+  // Parse VTT manually to bypass all Chromium MSE <track> bugs completely
+  useEffect(() => {
+    parsedCuesRef.current = [];
+    setActiveSubtitleText("");
+    
+    if (currentSubtitleLabel === 'Off') return;
+    
+    const subs = allSources[currentSourceIndex]?.subtitles || [];
+    const targetSub = subs.find(s => s.label === currentSubtitleLabel) || subs.find(s => s.default) || subs[0];
+    if (!targetSub) return;
+    
+    let isActive = true;
+    
+    const loadSubtitles = async () => {
+      try {
+        let text = '';
+        if (targetSub.url.startsWith('file://')) {
+          const filePath = targetSub.url.replace('file://', '');
+          // @ts-ignore
+          const res = await window.electron.invoke('read-local-file', filePath);
+          if (!res.success) throw new Error(res.error);
+          text = res.data;
+        } else {
+          const response = await fetch(targetSub.url);
+          text = await response.text();
+        }
+        
+        if (!isActive) return;
+        const lines = text.split('\n');
+        const cues: {start: number, end: number, text: string}[] = [];
+        let currentCue: any = null;
+        
+        const parseTime = (t: string) => {
+          const parts = t.replace(',', '.').trim().split(':');
+          if (parts.length === 3) return parseFloat(parts[0])*3600 + parseFloat(parts[1])*60 + parseFloat(parts[2]);
+          if (parts.length === 2) return parseFloat(parts[0])*60 + parseFloat(parts[1]);
+          return 0;
+        };
+        
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (line.includes('-->')) {
+            const parts = line.split('-->');
+            currentCue = { start: parseTime(parts[0]), end: parseTime(parts[1]), text: '' };
+            cues.push(currentCue);
+          } else if (currentCue && line && !line.includes('WEBVTT')) {
+            currentCue.text += (currentCue.text ? '\n' : '') + line;
+          } else if (!line) {
+            currentCue = null;
+          }
+        }
+        parsedCuesRef.current = cues;
+        
+        // Debug telemetry
+        fetch(`http://127.0.0.1:3001/api/ping?msg=${encodeURIComponent('VTT Parsed. Count: ' + cues.length + ' First: ' + (cues[0]?.text || 'none'))}`).catch(()=>{});
+      } catch (err: any) {
+        if (!isActive) return;
+        console.error("Failed to parse VTT", err);
+        fetch(`http://127.0.0.1:3001/api/ping?msg=${encodeURIComponent('VTT Failed: ' + err.message)}`).catch(()=>{});
+      }
+    };
+    
+    loadSubtitles();
+      
+    return () => { isActive = false; };
+  }, [allSources, currentSourceIndex, currentSubtitleLabel]);
+
+  // Auto-select default subtitle when source changes
+  useEffect(() => {
+    const subs = allSources?.[currentSourceIndex]?.subtitles || [];
+    if (subs.length > 0 && currentSubtitleLabel === 'Off') {
+      const defSub = subs.find(s => s.default) || subs.find(s => s.label === 'English') || subs[0];
+      setCurrentSubtitleLabel(defSub.label);
+    } else if (subs.length > 0 && !subs.find(s => s.label === currentSubtitleLabel)) {
+      const defSub = subs.find(s => s.default) || subs.find(s => s.label === 'English') || subs[0];
+      setCurrentSubtitleLabel(defSub.label);
+    }
+  }, [allSources, currentSourceIndex]);
+
+  // Enforce subtitle track visibility continuously
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    
+    const enforceTracks = () => {
+      const tracks = video.textTracks;
+      for (let i = 0; i < tracks.length; i++) {
+        // Hls.js might inject empty tracks, so match by label instead of index
+        if (currentSubtitleLabel === 'Off') {
+          tracks[i].mode = 'hidden';
+        } else {
+          tracks[i].mode = (tracks[i].label === currentSubtitleLabel) ? 'showing' : 'hidden';
+        }
+      }
+    };
+    
+    enforceTracks();
+    const intervalId = setInterval(enforceTracks, 1000);
+    return () => clearInterval(intervalId);
+  }, [currentSubtitleLabel, allSources, currentSourceIndex, streamUrl]);
 
   // Load stream into video element with HLS.js
   useEffect(() => {
@@ -97,8 +213,17 @@ export function VideoPlayer({
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
     const onTimeUpdate = () => {
-      setCurrentTime(video.currentTime);
-      setProgress(video.duration ? (video.currentTime / video.duration) * 100 : 0);
+      const time = video.currentTime;
+      setCurrentTime(time);
+      setProgress(video.duration ? (time / video.duration) * 100 : 0);
+      
+      if (parsedCuesRef.current.length > 0) {
+        const cue = parsedCuesRef.current.find(c => time >= c.start && time <= c.end);
+        if (cue && activeSubtitleText !== cue.text) {
+           fetch(`http://127.0.0.1:3001/api/ping?msg=${encodeURIComponent('Setting subtitle: ' + cue.text + ' at ' + time)}`).catch(()=>{});
+        }
+        setActiveSubtitleText(cue ? cue.text : "");
+      }
     };
     const onDuration = () => setDuration(video.duration);
     const onWaiting = () => setBuffering(true);
@@ -212,6 +337,33 @@ export function VideoPlayer({
     return `${m}:${sec.toString().padStart(2, '0')}`;
   };
 
+  const handleDownload = async () => {
+    if (isDownloading) return;
+    setIsDownloading(true);
+    try {
+      const currentSource = allSources[currentSourceIndex] || { url: streamUrl, headers: {} };
+      const currentSub = currentSource.subtitles?.find(s => s.label === currentSubtitleLabel) 
+                      || currentSource.subtitles?.find(s => s.default) 
+                      || currentSource.subtitles?.[0];
+                      
+      // @ts-ignore
+      const res = await window.electron.invoke('start-download', {
+        id: Date.now().toString(),
+        videoUrl: currentSource.url || streamUrl,
+        subtitleUrl: currentSub ? currentSub.url : undefined,
+        title: `${title} - Episode ${episode}`,
+        headers: currentSource.headers || {}
+      });
+      if (res && res.error) {
+        console.error('Download start error:', res.error);
+      }
+      setTimeout(() => setIsDownloading(false), 2000);
+    } catch (err) {
+      console.error('Failed to trigger download', err);
+      setIsDownloading(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-black flex flex-col" ref={containerRef}
       onMouseMove={resetControlsTimer} onClick={resetControlsTimer}>
@@ -228,12 +380,15 @@ export function VideoPlayer({
             sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-popups"
           />
         ) : (
-          <video
-            ref={videoRef}
-            className="w-full h-full object-contain"
-            playsInline
-            preload="auto"
-          />
+          <>
+            <video
+              ref={videoRef}
+              className="w-full h-full object-contain"
+              playsInline
+              preload="auto"
+            />
+            
+          </>
         )}
 
         {/* Loading / Buffering overlay */}
@@ -278,6 +433,37 @@ export function VideoPlayer({
           </div>
         )}
       </div>
+
+      {/* Download Started Popup */}
+      {isDownloading && (
+        <div className="absolute inset-0 z-[10000] flex items-center justify-center pointer-events-none animate-in fade-in zoom-in duration-300">
+          <div className="bg-black/80 backdrop-blur-md px-8 py-6 rounded-3xl flex flex-col items-center gap-4 border border-white/10 shadow-2xl">
+            <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center border border-green-500/30">
+              <Download className="w-8 h-8 text-green-500" />
+            </div>
+            <div className="text-center">
+              <p className="text-white font-black text-xl mb-1 tracking-wide">Download Started</p>
+              <p className="text-white/60 text-sm font-medium">Check the Downloads Library for progress</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Subtitle Overlay (Moved outside video container to prevent hardware layer overlap) */}
+      {activeSubtitleText && (
+        <div className="absolute bottom-[12%] left-0 right-0 pointer-events-none flex justify-center px-8 z-[9999] transform-gpu">
+          <div 
+            className="text-white text-center font-bold tracking-wide"
+            style={{
+              fontSize: 'clamp(14px, 2.5vw, 32px)',
+              lineHeight: '1.2',
+              textShadow: '0px 0px 6px rgba(0,0,0,0.9), 0px 0px 2px rgba(0,0,0,1), 2px 2px 2px rgba(0,0,0,0.8), -1px -1px 2px rgba(0,0,0,0.8)',
+              whiteSpace: 'pre-wrap'
+            }}
+            dangerouslySetInnerHTML={{ __html: activeSubtitleText }}
+          />
+        </div>
+      )}
 
       {/* Controls bar — fades in/out (Disabled for iframes) */}
       {!isIframe && (
@@ -381,6 +567,17 @@ export function VideoPlayer({
             </button>
           )}
 
+          {/* Download Button */}
+          <button
+            onClick={handleDownload}
+            disabled={isDownloading}
+            title="Download Episode"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded border transition-all text-[10px] font-bold uppercase tracking-wider ${isDownloading ? 'bg-green-500/20 text-green-400 border-green-500/30' : 'bg-primary/20 hover:bg-primary/30 text-primary border-primary/30'}`}
+          >
+            {isDownloading ? <Check className="w-3.5 h-3.5" /> : <Download className="w-3.5 h-3.5" />}
+            <span className="hidden sm:inline">{isDownloading ? 'Downloading' : 'Download'}</span>
+          </button>
+
           {/* Quality Selector (HLS levels or single quality) */}
           {!isIframe && (
             <div className="flex items-center bg-primary/20 hover:bg-primary/30 rounded border border-primary/30 px-2 mr-1 transition-all">
@@ -401,6 +598,25 @@ export function VideoPlayer({
                     {allSources[currentSourceIndex]?.quality || 'Auto'}
                   </option>
                 )}
+              </select>
+            </div>
+          )}
+
+          {/* Subtitles Selector */}
+          {!isIframe && allSources[currentSourceIndex]?.subtitles && allSources[currentSourceIndex].subtitles.length > 0 && (
+            <div className="flex items-center bg-primary/20 hover:bg-primary/30 rounded border border-primary/30 px-2 mr-1 transition-all">
+              <span className="text-primary text-[8px] font-black uppercase mr-2 opacity-60">CC</span>
+              <select
+                value={currentSubtitleLabel}
+                onChange={(e) => setCurrentSubtitleLabel(e.target.value)}
+                className="bg-transparent text-primary text-[10px] font-bold py-1.5 outline-none cursor-pointer appearance-none uppercase tracking-wider"
+              >
+                <option value="Off" className="bg-black text-white">Off</option>
+                {allSources[currentSourceIndex].subtitles.map((sub, idx) => (
+                  <option key={idx} value={sub.label} className="bg-black text-white">
+                    {sub.label}
+                  </option>
+                ))}
               </select>
             </div>
           )}
@@ -501,6 +717,14 @@ export function VideoPlayer({
               <span>Next Mirror ({currentSourceIndex + 1}/{allSources.length})</span>
             </button>
           )}
+          <button
+            onClick={handleDownload}
+            disabled={isDownloading}
+            title="Download Episode"
+            className={`w-10 h-10 rounded-full flex items-center justify-center transition-all border border-white/20 shadow-xl ${isDownloading ? 'bg-green-500/80' : 'bg-black/60 hover:bg-primary'}`}
+          >
+            {isDownloading ? <Check className="w-5 h-5 text-white" /> : <Download className="w-5 h-5 text-white" />}
+          </button>
           <button onClick={onClose}
             title="Close player"
             className="w-10 h-10 rounded-full bg-black/60 hover:bg-red-500/80 flex items-center justify-center transition-all border border-white/20 shadow-xl"

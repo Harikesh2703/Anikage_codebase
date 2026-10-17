@@ -1,4 +1,4 @@
-import { Settings, RefreshCcw, ShieldAlert, Database, FileText, Info, Download, AlertCircle } from 'lucide-react';
+import { Settings, RefreshCcw, ShieldAlert, Database, FileText, Info, Download, AlertCircle, Blocks, CheckCircle2, Trash2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import type { AppNotification } from './NotificationsView';
 import { api } from '../../lib/api';
@@ -12,6 +12,8 @@ export function SettingsView({ notifications }: SettingsViewProps) {
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [pendingUpdates, setPendingUpdates] = useState(0);
   const [versions, setVersions] = useState<any>(null);
+  const [plugins, setPlugins] = useState<any[]>([]);
+  const [clearingHistory, setClearingHistory] = useState(false);
 
   useEffect(() => {
     // Check if there are any pending updates
@@ -21,7 +23,23 @@ export function SettingsView({ notifications }: SettingsViewProps) {
 
     // Fetch local versions
     api.getLocalVersions().then(v => setVersions(v)).catch(console.error);
+    
+    // Fetch plugins
+    api.getPlugins().then(setPlugins).catch(console.error);
   }, [notifications]);
+
+  const handleSetActivePlugin = async (id: string) => {
+    try {
+      const res = await api.setActivePlugin(id);
+      if (res.success) {
+        const updated = await api.getPlugins();
+        setPlugins(updated);
+      }
+    } catch(err) {
+      console.error(err);
+      alert('Failed to set active plugin');
+    }
+  };
 
   const handleNavigateToUpdates = () => {
     // Navigate to notifications tab
@@ -72,6 +90,46 @@ export function SettingsView({ notifications }: SettingsViewProps) {
       </header>
 
       <div className="space-y-6">
+        {/* Scraper Plugins Section */}
+        <section className="bg-card border border-border rounded-3xl overflow-hidden shadow-[var(--shadow-card)]">
+          <div className="p-6 border-b border-border bg-muted/30">
+            <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+              <Blocks className="w-5 h-5 text-primary" />
+              Scraper Plugins
+            </h2>
+            <p className="text-sm text-muted-foreground mt-1">Manage dynamically loaded scrapers for your media center.</p>
+          </div>
+          
+          <div className="p-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {plugins.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No plugins loaded.</p>
+              ) : (
+                plugins.map(plugin => (
+                  <div key={plugin.id} className={`flex items-center justify-between p-4 rounded-xl border ${plugin.isActive ? 'border-primary/50 bg-primary/5' : 'border-border bg-background'}`}>
+                    <div>
+                      <h3 className="font-bold text-foreground">{plugin.name}</h3>
+                      <p className="text-xs text-muted-foreground font-mono">v{plugin.version} • ID: {plugin.id}</p>
+                    </div>
+                    {plugin.isActive ? (
+                      <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-primary">
+                        <CheckCircle2 className="w-4 h-4" /> Active
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => handleSetActivePlugin(plugin.id)}
+                        className="text-xs font-bold uppercase tracking-wider text-foreground hover:text-primary border border-border hover:border-primary/50 bg-muted/50 px-3 py-1.5 rounded transition-colors"
+                      >
+                        Set Active
+                      </button>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </section>
+
         {/* Maintenance Section */}
         <section className="bg-card border border-border rounded-3xl overflow-hidden shadow-[var(--shadow-card)]">
           <div className="p-6 border-b border-border bg-muted/30">
@@ -122,7 +180,7 @@ export function SettingsView({ notifications }: SettingsViewProps) {
             <p className="text-sm text-muted-foreground mt-1">Move your watch history and library to a new device.</p>
           </div>
           
-          <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div className="p-8 grid grid-cols-1 md:grid-cols-3 gap-8">
             <div className="space-y-4">
               <h3 className="font-bold text-foreground flex items-center gap-2">
                 <Download className="w-4 h-4" />
@@ -184,6 +242,39 @@ export function SettingsView({ notifications }: SettingsViewProps) {
                 className="w-full py-3 bg-muted hover:bg-muted/80 text-foreground border border-border rounded-xl font-bold text-xs uppercase tracking-widest transition-all"
               >
                 Restore from File
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <h3 className="font-bold text-red-400 flex items-center gap-2">
+                <Trash2 className="w-4 h-4" />
+                Clear Watch History
+              </h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                Reset your "Continue Watching" row and clear your playback progress.
+              </p>
+              <button
+                disabled={clearingHistory}
+                onClick={async () => {
+                  if (confirm('Are you sure you want to clear your entire watch history? This cannot be undone.')) {
+                    setClearingHistory(true);
+                    try {
+                      const res = await fetch('http://127.0.0.1:3001/api/history', { method: 'DELETE' });
+                      if (res.ok) {
+                        alert('Watch history cleared successfully!');
+                      } else {
+                        alert('Failed to clear watch history');
+                      }
+                    } catch (err: any) {
+                      alert('An error occurred: ' + err.message);
+                    } finally {
+                      setClearingHistory(false);
+                    }
+                  }
+                }}
+                className="w-full py-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-xl font-bold text-xs uppercase tracking-widest transition-all disabled:opacity-50"
+              >
+                {clearingHistory ? 'Clearing...' : 'Clear History'}
               </button>
             </div>
           </div>

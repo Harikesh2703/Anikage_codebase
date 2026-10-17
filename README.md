@@ -27,8 +27,8 @@ A desktop application to browse and stream anime with a beautiful UI and powerfu
 - [Project Structure](#project-structure)
 - [Dependencies](#dependencies)
 - [Troubleshooting](#troubleshooting)
-- [Contributing](./CONTRIBUTING.md)
-- [Disclaimer](./disclaimer.md)
+- [Contributing](#contributing)
+- [Disclaimer](#disclaimer)
 
 ## Features
 
@@ -262,7 +262,23 @@ cd ../..
 
 ## Contributing
 
-Contributions are welcome! Please read [CONTRIBUTING.md](./CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
+Contributions are welcome!
+
+### Pull Requests
+- Appease the linter
+- Bump the version
+- Adjust the Readme according to your changes (if applicable)
+- No extra dependencies unless absolutely necessary
+- If you're fixing an issue, open an issue as well or link existing one
+
+### Issues
+- Use the issue templates
+- Provide screenshot if applicable
+
+### How else can I help?
+- Take part in troubleshooting and testing
+- Star the repo
+- Follow the maintainers
 
 ## License
 
@@ -270,4 +286,15 @@ GNU General Public License v3.0
 
 ## Disclaimer
 
-This tool is for educational purposes only. Please support the anime industry by using legal streaming services when possible. See [DISCLAIMER.md](./disclaimer.md) for more information.
+**This project: Anikage**
+
+Anikage is a desktop application for browsing and streaming anime content. All content available through the project is hosted by external non-affiliated sources. Any content served through this project is publicly accessible. If your site is listed in this project, the code is pretty much public. Take necessary measures to counter the exploits used to extract content in your site.
+
+This project is to be used at the user's own risk, based on their government and laws. This project has no control on the content it is serving, using copyrighted content from the providers is not going to be accounted for by the developer. It is the user's own risk.
+
+**DMCA and Copyright Infringements**
+
+A browser is a tool, and the maliciousness of the tool is directly based on the user. This project uses client-side content access mechanisms. Hence, the copyright infringements or DMCA in this project's regards are to be forwarded to the associated site by the associated notifier of any such claims. Do not harass the maintainer.
+
+**Contacting the maintainer**
+Begin by making a GitHub issue or sending an email to contact@anikage.com

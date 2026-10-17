@@ -1,0 +1,28 @@
+# Cargo build output
+target/
+
+# Packaged standalone releases
+dist/
+
+# Editor and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local logs and environment overrides
+*.log
+aniplay-allanime-debug-*.json
+.env
+.env.*
+logs/
+.venv/
+
+# Local VHS showcase artifacts
+showcase/output/
+showcase/.tools/
+
+# Local VHS showcase artifacts
+showcase/output/
+
+ani-cli-anikoto2/

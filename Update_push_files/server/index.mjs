@@ -16,7 +16,7 @@ const Module = require('module');
 const originalRequire = Module.prototype.require;
 
 Module.prototype.require = function (id) {
-  if (id.startsWith('../utils/') && this.filename && (this.filename.includes('patches') || this.filename.includes('allanime.js'))) {
+  if (id.startsWith('../utils/') && this.filename && (this.filename.includes('patches') || this.filename.includes('hianime.js'))) {
     const bundleSrcPath = process.env.NODE_PATH ? join(process.env.NODE_PATH, '../src') : join(__dirname, '../src');
     const resolvedPath = join(bundleSrcPath, 'utils', id.replace(/^\.\.\/utils\//, ''));
     return originalRequire.call(this, resolvedPath);
@@ -33,13 +33,13 @@ app.use(express.json());
 // Health check
 app.get('/api/ping', (req, res) => res.json({ status: 'ok' }));
 
-// Lazy-load allanime API
+// Lazy-load hianime API
 let _api = null;
 function getApi() {
   if (!_api) {
     const userDataPath = process.env.USER_DATA_PATH || join(os.homedir(), '.config', 'Anikage');
-    const patchPath = join(userDataPath, 'patches', 'allanime.js');
-    const bundledPath = join(__dirname, '../src/api/allanime.js');
+    const patchPath = join(userDataPath, 'patches', 'hianime.js');
+    const bundledPath = join(__dirname, '../src/api/hianime.js');
     
     const fs = require('fs');
     let apiPath = bundledPath;

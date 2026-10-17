@@ -1,0 +1,97 @@
+param(
+    [string]$InstallDirectory = $(if ($env:ANI_CLI_RS_INSTALL_DIR) { $env:ANI_CLI_RS_INSTALL_DIR } else { Join-Path ([Environment]::GetFolderPath("UserProfile")) ".local\bin" }),
+    [switch]$NoPathUpdate,
+    [switch]$UseSetup
+)
+
+$ErrorActionPreference = "Stop"
+
+function Get-Sha256Hash {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        $sha256 = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            return ([System.BitConverter]::ToString($sha256.ComputeHash($stream))).Replace("-", "")
+        }
+        finally {
+            $sha256.Dispose()
+        }
+    }
+    finally {
+        $stream.Dispose()
+    }
+}
+
+if ($env:ANI_CLI_RS_WAIT_FOR_PID) {
+    Wait-Process -Id ([int]$env:ANI_CLI_RS_WAIT_FOR_PID) -ErrorAction SilentlyContinue
+}
+$repository = "vorlie/ani-cli-rs"
+# ani-cli-rs currently publishes one Windows archive. Windows 11 on ARM64 can
+# run this x64 build through its compatibility layer.
+$target = "x86_64-pc-windows-msvc"
+
+$headers = @{ Accept = "application/vnd.github+json"; "User-Agent" = "ani-cli-rs-installer" }
+$release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repository/releases/latest" -Headers $headers
+$version = $release.tag_name.TrimStart("v")
+$assetName = if ($UseSetup) { "ani-cli-rs-$version-windows-x64-setup.exe" } else { "ani-cli-rs-$version-$target.zip" }
+$asset = $release.assets | Where-Object name -eq $assetName | Select-Object -First 1
+$checksumAsset = $release.assets | Where-Object name -eq "$assetName.sha256" | Select-Object -First 1
+if (-not $asset -or -not $checksumAsset) {
+    throw "The latest release does not contain $assetName and its checksum."
+}
+
+$temporaryDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("ani-cli-rs-" + [guid]::NewGuid())
+New-Item -ItemType Directory -Force $temporaryDirectory | Out-Null
+try {
+    $downloadPath = Join-Path $temporaryDirectory $assetName
+    $checksumPath = "$downloadPath.sha256"
+    Invoke-WebRequest -Uri $asset.browser_download_url -Headers $headers -OutFile $downloadPath
+    Invoke-WebRequest -Uri $checksumAsset.browser_download_url -Headers $headers -OutFile $checksumPath
+
+    $expectedHash = ((Get-Content -LiteralPath $checksumPath -Raw).Trim() -split "\s+")[0]
+    $actualHash = Get-Sha256Hash -Path $downloadPath
+    if ($expectedHash -ne $actualHash) { throw "Checksum verification failed for $assetName." }
+
+    if ($UseSetup) {
+        $setupProcess = Start-Process -FilePath $downloadPath -Wait -PassThru
+        if ($setupProcess.ExitCode -ne 0) {
+            throw "The Windows setup program exited with code $($setupProcess.ExitCode)."
+        }
+    }
+    else {
+        $expandedDirectory = Join-Path $temporaryDirectory "expanded"
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($downloadPath, $expandedDirectory)
+        $binary = Get-ChildItem -LiteralPath $expandedDirectory -Filter "ani-cli-rs.exe" -File -Recurse | Select-Object -First 1
+        if (-not $binary) { throw "The release archive did not contain ani-cli-rs.exe." }
+
+        New-Item -ItemType Directory -Force $InstallDirectory | Out-Null
+        Copy-Item -LiteralPath $binary.FullName -Destination (Join-Path $InstallDirectory "ani-cli-rs.exe") -Force
+    }
+} finally {
+    if (Test-Path -LiteralPath $temporaryDirectory) { Remove-Item -LiteralPath $temporaryDirectory -Recurse -Force }
+}
+
+if (-not $UseSetup -and -not $NoPathUpdate) {
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    $pathEntries = @($userPath -split ";" | Where-Object { $_ })
+    if (-not ($pathEntries | Where-Object { $_.TrimEnd("\") -ieq $InstallDirectory.TrimEnd("\") })) {
+        $newPath = (@($pathEntries) + $InstallDirectory) -join ";"
+        [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
+        $env:Path = "$InstallDirectory;$env:Path"
+        Write-Host "Added $InstallDirectory to the user PATH. Open a new terminal to use it there."
+    }
+}
+
+if ($UseSetup) {
+    Write-Host "ani-cli-rs $($release.tag_name) was installed through Windows Setup."
+}
+else {
+    Write-Host "Installed ani-cli-rs $($release.tag_name) to $InstallDirectory\ani-cli-rs.exe"
+}
+
+if ($env:ANI_CLI_RS_DELETE_INSTALLER -eq "1" -and $PSCommandPath) {
+    Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
+}

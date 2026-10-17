@@ -6,9 +6,7 @@ class Config {
   constructor() {
     this.version = '1.0.0';
     this.agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0';
-    this.allanimeRefr = 'https://allmanga.to';
-    this.allanimeBase = 'allanime.day';
-    this.allanimeApi = `https://api.${this.allanimeBase}`;
+    this.hianimeBase = 'hianime.at';
     
     // Environment variables
     this.mode = process.env.ANIKAGE_MODE || 'sub';

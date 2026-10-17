@@ -3,6 +3,7 @@ import cors from 'cors';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import fs from 'fs';
 import os from 'os';
 import { db_helper } from './db.mjs';
 
@@ -27,41 +28,39 @@ Module.prototype.require = function (id) {
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Restrict CORS to exact local frontend ports
-const allowedOrigins = ['http://localhost:8080', 'http://127.0.0.1:8080', 'http://localhost:5173', 'app://localhost'];
-app.use(cors({ origin: function (origin, callback) {
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  } }));
+// CORS middleware - allow local origins, loopback and direct requests
+app.use(cors({
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+    try {
+      const parsed = new URL(origin);
+      if (
+        parsed.hostname === 'localhost' ||
+        parsed.hostname === '127.0.0.1' ||
+        parsed.protocol === 'app:' ||
+        parsed.protocol === 'file:'
+      ) {
+        return callback(null, true);
+      }
+    } catch (e) {}
+    callback(null, false);
+  }
+}));
 app.use(express.json());
 
 // Health check
-app.get('/api/ping', (req, res) => res.json({ status: 'ok' }));
 
-// Lazy-load allanime API
-let _api = null;
+app.get('/api/ping', async (req, res) => {
+  const fs = await import('fs');
+  if (req.query.msg) fs.appendFileSync('telemetry.log', req.query.msg + '\n');
+  res.json({ status: 'ok' });
+});
+
+import pluginManager from './pluginManager.mjs';
+import { enrichAnimeList, getCatalogAnime, getAnimeTitleById } from './metadata.mjs';
+
 function getApi() {
-  if (!_api) {
-    const userDataPath = process.env.USER_DATA_PATH || join(os.homedir(), '.config', 'Anikage');
-    const patchPath = join(userDataPath, 'patches', 'allanime.js');
-    const bundledPath = join(__dirname, '../src/api/allanime.js');
-    
-    const fs = require('fs');
-    let apiPath = bundledPath;
-
-    // SHADOW LOADING: Check for a hot-patch first
-    if (fs.existsSync(patchPath)) {
-      console.log('\x1b[35m[Hot-Patch]\x1b[0m Loading patched scraper from:', patchPath);
-      apiPath = patchPath;
-    }
-
-    const apiModule = require(apiPath);
-    _api = apiModule.default || apiModule;
-  }
-  return _api;
+  return pluginManager.getActivePlugin();
 }
 
 /**
@@ -104,15 +103,144 @@ async function probeMetadata(url) {
   });
 }
 
+// GET /api/stream-local
+app.get('/api/stream-local', (req, res) => {
+  const videoPath = req.query.path;
+  if (!videoPath || !fs.existsSync(videoPath)) {
+    return res.status(404).send('File not found');
+  }
+
+  const stat = fs.statSync(videoPath);
+  const fileSize = stat.size;
+  const range = req.headers.range;
+
+  console.log(`[StreamLocal] Request for ${videoPath}, Range: ${range}`);
+
+  if (range) {
+    const parts = range.replace(/bytes=/, "").split("-");
+    let start = 0;
+    let end = fileSize - 1;
+    
+    if (parts[0] === "") {
+      start = fileSize - parseInt(parts[1], 10);
+    } else {
+      start = parseInt(parts[0], 10);
+      end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    }
+    
+    if (start >= fileSize || end >= fileSize) {
+      console.log(`[StreamLocal] 416 Range Not Satisfiable: ${start}-${end}`);
+      res.status(416).send('Requested range not satisfiable\n'+start+'-'+end);
+      return;
+    }
+
+    const chunksize = (end - start) + 1;
+    console.log(`[StreamLocal] 206 Partial Content: ${start}-${end} (Chunk: ${chunksize})`);
+    
+    const file = fs.createReadStream(videoPath, { start, end });
+    const head = {
+      'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': chunksize,
+      'Content-Type': 'video/mp4',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length'
+    };
+    res.writeHead(206, head);
+    file.pipe(res);
+  } else {
+    console.log(`[StreamLocal] 200 OK (Full File: ${fileSize})`);
+    const head = {
+      'Content-Length': fileSize,
+      'Content-Type': 'video/mp4',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Expose-Headers': 'Content-Length'
+    };
+    res.writeHead(200, head);
+    fs.createReadStream(videoPath).pipe(res);
+  }
+});
+
+// GET /api/plugins
+app.get('/api/plugins', (req, res) => {
+  res.json(pluginManager.getAllPlugins());
+});
+
+// POST /api/plugins/active
+app.post('/api/plugins/active', express.json(), (req, res) => {
+  try {
+    const { id } = req.body;
+    pluginManager.setActivePlugin(id);
+    res.json({ success: true, activePlugin: id });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// POST /api/download
+app.post('/api/download', express.json(), async (req, res) => {
+  try {
+    const { url, filename, referer, subtitle } = req.body;
+    if (!url || !filename) {
+      return res.status(400).json({ error: "Missing url or filename" });
+    }
+    
+    // Fire and forget download
+    const downloader = require('../src/download/downloader.js');
+    downloader.download(url, filename, { referer, subtitle }).catch(err => {
+      console.error("[Downloader Error]:", err.message);
+    });
+    
+    res.json({ success: true, message: "Download started in background" });
+  } catch(err) {
+    console.error('/api/download error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/trending?limit=20&genre=Shounen
 app.get('/api/trending', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 20;
     const genre = req.query.genre || null;
-    const api = getApi();
-    const results = await api.searchAnime('', { sortBy: 'Trending', limit });
+
+    // 1. First, attempt to fetch high-quality catalog data from AniList
+    try {
+      const catalogResults = await getCatalogAnime({
+        perPage: limit,
+        genre: genre || undefined,
+        sort: 'TRENDING_DESC'
+      });
+      if (catalogResults && catalogResults.length > 0) {
+        return res.json(catalogResults.slice(0, limit));
+      }
+    } catch (catalogErr) {
+      console.warn('[Catalog] AniList fetch failed, falling back to active scraper:', catalogErr.message);
+    }
+
+    // 2. Fallback to active scraper plugin
+    let api = getApi();
+    let results = [];
+    try {
+       if (typeof api.getTrending === 'function') {
+           results = await api.getTrending();
+       } else {
+           results = await api.searchAnime('', { sortBy: 'Trending', limit });
+       }
+       if (results.length === 0 && pluginManager.activePluginId === 'hianime') throw new Error("No results");
+    } catch (err) {
+       console.error("Primary plugin trending failed, attempting fallback:", err.message);
+       if (pluginManager.activePluginId === 'hianime') {
+          try {
+            api = pluginManager.setActivePlugin('anikoto').instance;
+            results = await api.searchAnime('top', { sortBy: 'Trending', limit });
+          } catch(fallbackErr) {
+             console.error("Fallback plugin also failed:", fallbackErr.message);
+          }
+       }
+    }
     const mapped = results.map(r => ({
-      id: r.id,
+      id: r.id.includes(':') ? r.id : `${pluginManager.activePluginId}:${r.id}`,
       title: r.name,
       coverImage: r.thumbnail || '',
       banner: r.banner || r.thumbnail || '',
@@ -120,7 +248,8 @@ app.get('/api/trending', async (req, res) => {
       synopsis: r.description || '',
       score: r.score || 0,
       type: r.type || 'TV',
-      episodes: r.episodes || 0,
+      episodes: r.episodes || null,
+      provider: r.provider || pluginManager.activePluginId
     }));
     const filtered = genre
       ? mapped.filter(a => a.tags.some(t => t.toLowerCase().includes(genre.toLowerCase())))
@@ -137,15 +266,30 @@ app.get('/api/search', async (req, res) => {
   try {
     const q = req.query.q || '';
     if (!q.trim()) return res.json([]);
-    const api = getApi();
-    const results = await api.searchAnime(q);
+    let api = getApi();
+    let results = [];
+    try {
+       results = await api.searchAnime(q);
+       if (results.length === 0 && pluginManager.activePluginId === 'hianime') throw new Error("No results");
+    } catch (err) {
+       console.error("Primary plugin search failed, attempting fallback:", err.message);
+       if (pluginManager.activePluginId === 'hianime') {
+          try {
+            api = pluginManager.setActivePlugin('anikoto').instance;
+            results = await api.searchAnime(q);
+          } catch(fallbackErr) {
+             console.error("Fallback plugin also failed:", fallbackErr.message);
+          }
+       }
+    }
     res.json(results.map(r => ({
-      id: r.id,
+      id: r.id.includes(':') ? r.id : `${pluginManager.activePluginId}:${r.id}`,
       title: r.name,
       coverImage: r.thumbnail || '',
       tags: r.genres || [],
-      episodes: r.episodes || 0,
+      episodes: r.episodes || null,
       score: r.score || 0,
+      provider: r.provider || pluginManager.activePluginId
     })));
   } catch (err) {
     console.error('/api/search error:', err.message);
@@ -153,12 +297,231 @@ app.get('/api/search', async (req, res) => {
   }
 });
 
+/**
+ * Resilient multi-provider episode resolver
+ */
+async function resolveAnimeEpisodes(showId, titleHint = '') {
+  let title = titleHint;
+  let targetPluginId = null;
+  let actualShowId = showId;
+
+  if (showId.startsWith('anilist:')) {
+    const anilistId = showId.replace('anilist:', '');
+    const meta = await getAnimeTitleById(anilistId);
+    if (meta) {
+      title = meta.english || meta.romaji || meta.preferred || title;
+    }
+  } else if (showId.startsWith('anikoto:') || showId.startsWith('anikoto2:')) {
+    targetPluginId = 'anikoto';
+    actualShowId = showId;
+    try {
+      const b64 = showId.replace(/^anikoto2?:/, '');
+      const parsed = JSON.parse(Buffer.from(b64, 'base64').toString('utf8'));
+      if (parsed.title) title = parsed.title;
+    } catch (e) {}
+  } else if (showId.startsWith('hianime:')) {
+    targetPluginId = 'hianime';
+    actualShowId = showId.substring('hianime:'.length);
+    const derived = actualShowId.replace(/-\d+$/, '').replace(/-/g, ' ');
+    title = title || derived;
+  } else if (/^[a-zA-Z0-9_-]+-\d+$/.test(showId)) {
+    targetPluginId = 'hianime';
+    actualShowId = showId;
+    const derived = actualShowId.replace(/-\d+$/, '').replace(/-/g, ' ');
+    title = title || derived;
+  } else if (showId.includes(':')) {
+    const parts = showId.split(':');
+    targetPluginId = parts[0];
+    actualShowId = parts.slice(1).join(':');
+  }
+
+  // Candidate providers to try
+  const providersToTry = [];
+  if (targetPluginId && pluginManager.plugins.has(targetPluginId)) {
+    providersToTry.push(targetPluginId);
+  }
+  if (pluginManager.activePluginId && !providersToTry.includes(pluginManager.activePluginId)) {
+    providersToTry.push(pluginManager.activePluginId);
+  }
+  for (const [pId] of pluginManager.plugins) {
+    if (pId !== 'anikoto2' && !providersToTry.includes(pId)) {
+      providersToTry.push(pId);
+    }
+  }
+
+  // 1. Direct attempt on target provider
+  if (targetPluginId && pluginManager.plugins.has(targetPluginId)) {
+    const p = pluginManager.plugins.get(targetPluginId);
+    try {
+      const eps = await p.instance.getEpisodesList(actualShowId);
+      if (eps && eps.length > 0) {
+        console.log(`[Episodes] Direct ${targetPluginId} returned ${eps.length} episodes for ${actualShowId}`);
+        return { episodes: eps, provider: targetPluginId, showId: actualShowId, title };
+      }
+    } catch (e) {
+      console.warn(`[Episodes] Direct ${targetPluginId} failed for ${actualShowId}: ${e.message}`);
+    }
+  }
+
+  // 2. Search across providers by title
+  if (title) {
+    for (const pId of providersToTry) {
+      const p = pluginManager.plugins.get(pId);
+      if (!p) continue;
+      try {
+        console.log(`[Episodes] Searching provider ${pId} for "${title}"`);
+        const searchResults = await p.instance.searchAnime(title);
+        if (searchResults && searchResults.length > 0) {
+          const match = searchResults[0];
+          const eps = await p.instance.getEpisodesList(match.id);
+          if (eps && eps.length > 0) {
+            console.log(`[Episodes] Provider ${pId} returned ${eps.length} episodes for "${title}" (ID: ${match.id})`);
+            return { episodes: eps, provider: pId, showId: match.id, title };
+          }
+        }
+      } catch (err) {
+        console.warn(`[Episodes] Search on ${pId} for "${title}" failed: ${err.message}`);
+      }
+    }
+  }
+
+  // 3. Fallback attempt on active provider directly
+  try {
+    const activeP = getApi();
+    const eps = await activeP.getEpisodesList(actualShowId);
+    if (eps && eps.length > 0) {
+      return { episodes: eps, provider: pluginManager.activePluginId, showId: actualShowId, title };
+    }
+  } catch (e) {}
+
+  return null;
+}
+
+/**
+ * Resilient multi-provider stream source resolver
+ */
+async function resolveStreamSources(showId, episode, titleHint = '') {
+  let title = titleHint;
+  let targetPluginId = null;
+  let actualShowId = showId;
+
+  if (showId.startsWith('anilist:')) {
+    const anilistId = showId.replace('anilist:', '');
+    const meta = await getAnimeTitleById(anilistId);
+    if (meta) {
+      title = meta.english || meta.romaji || meta.preferred || title;
+    }
+  } else if (showId.startsWith('anikoto:') || showId.startsWith('anikoto2:')) {
+    targetPluginId = 'anikoto';
+    actualShowId = showId;
+    try {
+      const b64 = showId.replace(/^anikoto2?:/, '');
+      const parsed = JSON.parse(Buffer.from(b64, 'base64').toString('utf8'));
+      if (parsed.title) title = parsed.title;
+    } catch (e) {}
+  } else if (showId.startsWith('hianime:')) {
+    targetPluginId = 'hianime';
+    actualShowId = showId.substring('hianime:'.length);
+    const derived = actualShowId.replace(/-\d+$/, '').replace(/-/g, ' ');
+    title = title || derived;
+  } else if (/^[a-zA-Z0-9_-]+-\d+$/.test(showId)) {
+    targetPluginId = 'hianime';
+    actualShowId = showId;
+    const derived = actualShowId.replace(/-\d+$/, '').replace(/-/g, ' ');
+    title = title || derived;
+  } else if (showId.includes(':')) {
+    const parts = showId.split(':');
+    targetPluginId = parts[0];
+    actualShowId = parts.slice(1).join(':');
+  }
+
+  const providersToTry = [];
+  if (targetPluginId && pluginManager.plugins.has(targetPluginId)) {
+    providersToTry.push(targetPluginId);
+  }
+  if (pluginManager.activePluginId && !providersToTry.includes(pluginManager.activePluginId)) {
+    providersToTry.push(pluginManager.activePluginId);
+  }
+  for (const [pId] of pluginManager.plugins) {
+    if (pId !== 'anikoto2' && !providersToTry.includes(pId)) {
+      providersToTry.push(pId);
+    }
+  }
+
+  // 1. Direct attempt on target provider
+  if (targetPluginId && pluginManager.plugins.has(targetPluginId)) {
+    const p = pluginManager.plugins.get(targetPluginId);
+    const cacheKey = `${targetPluginId}:${actualShowId}:${episode}`;
+    try {
+      const cached = await db_helper.getLinksFromCache(cacheKey);
+      if (cached) {
+        if (cached.referer) p.instance.referer = cached.referer;
+        console.log(`[CACHE HIT] Serving sources for ${cacheKey} from SQLite cache`);
+        return { links: cached.sources || cached, fallback: cached.fallback || '', provider: targetPluginId };
+      }
+    } catch (e) {}
+
+    try {
+      console.log(`[STREAM] Fetching direct ${targetPluginId} embed URLs for ${actualShowId} ep ${episode}`);
+      const { sources, fallback } = await p.instance.getEpisodeEmbedUrls(actualShowId, episode);
+      const links = await p.instance.generateLinks(sources);
+      if (links && links.length > 0) {
+        return { links, fallback, provider: targetPluginId, cacheKey };
+      }
+    } catch (err) {
+      console.warn(`[STREAM] Direct ${targetPluginId} failed for ${actualShowId}: ${err.message}`);
+    }
+  }
+
+  // 2. Search fallback providers if direct failed or was catalog ID
+  if (title) {
+    for (const pId of providersToTry) {
+      if (pId === targetPluginId) continue;
+      const p = pluginManager.plugins.get(pId);
+      if (!p) continue;
+
+      try {
+        console.log(`[STREAM] Fallback searching ${pId} for "${title}"`);
+        const found = await p.instance.searchAnime(title);
+        if (found && found.length > 0) {
+          const match = found[0];
+          const matchedId = match.id.includes(':')
+            ? match.id.split(':').slice(1).join(':')
+            : match.id;
+          const cacheKey = `${pId}:${matchedId}:${episode}`;
+          try {
+            const cached = await db_helper.getLinksFromCache(cacheKey);
+            if (cached) {
+              if (cached.referer) p.instance.referer = cached.referer;
+              return { links: cached.sources || cached, fallback: cached.fallback || '', provider: pId };
+            }
+          } catch (e) {}
+
+          const { sources, fallback } = await p.instance.getEpisodeEmbedUrls(match.id, episode);
+          const links = await p.instance.generateLinks(sources);
+          if (links && links.length > 0) {
+            return { links, fallback, provider: pId, cacheKey };
+          }
+        }
+      } catch (err) {
+        console.warn(`[STREAM] Fallback on ${pId} for "${title}" failed: ${err.message}`);
+      }
+    }
+  }
+
+  return null;
+}
+
 // GET /api/episodes/:showId
 app.get('/api/episodes/:showId', async (req, res) => {
   try {
-    const api = getApi();
-    const episodes = await api.getEpisodesList(req.params.showId);
-    res.json(episodes);
+    const showId = req.params.showId;
+    const titleHint = req.query.title || '';
+    const result = await resolveAnimeEpisodes(showId, titleHint);
+    if (!result || !result.episodes || result.episodes.length === 0) {
+      return res.status(404).json({ error: `No episodes found for this anime on any active provider.` });
+    }
+    res.json(result.episodes);
   } catch (err) {
     console.error('/api/episodes error:', err.message);
     res.status(500).json({ error: err.message });
@@ -169,7 +532,18 @@ app.get('/api/episodes/:showId', async (req, res) => {
 app.get('/api/history', async (req, res) => {
   try {
     const history = await db_helper.getRecentHistory(15);
-    res.json(history);
+    
+    // Deduplicate by title to prevent showing the same anime multiple times from different plugins
+    const uniqueHistory = [];
+    const titles = new Set();
+    for (const item of history) {
+      if (!titles.has(item.title)) {
+        uniqueHistory.push(item);
+        titles.add(item.title);
+      }
+    }
+    
+    res.json(uniqueHistory);
   } catch (err) {
     console.error('/api/history error:', err.message);
     res.status(500).json({ error: err.message });
@@ -179,12 +553,24 @@ app.get('/api/history', async (req, res) => {
 // POST /api/history
 app.post('/api/history', async (req, res) => {
   try {
-    const { id, title, coverImage, episode, tags } = req.body;
+    const { id, title, coverImage, episode, tags, provider } = req.body;
     if (!id || !title) return res.status(400).json({ error: 'ID and Title required' });
-    await db_helper.saveProgress(id, title, coverImage, episode, tags);
+    const effectiveProvider = provider || (id.includes(':') ? id.split(':')[0] : pluginManager.activePluginId);
+    await db_helper.saveProgress(id, title, coverImage, episode, tags, effectiveProvider);
     res.json({ success: true });
   } catch (err) {
     console.error('POST /api/history error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/history
+app.delete('/api/history', async (req, res) => {
+  try {
+    await db_helper.clearHistory();
+    res.json({ success: true });
+  } catch (err) {
+    console.error('DELETE /api/history error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -193,33 +579,19 @@ app.post('/api/history', async (req, res) => {
 app.get('/api/sources/:showId/:episode', async (req, res) => {
   try {
     const { showId, episode } = req.params;
-    const cacheKey = `${showId}:${episode}`;
+    const titleHint = req.query.title || '';
+    const result = await resolveStreamSources(showId, episode, titleHint);
 
-    // Try reading from cache first
-    try {
-      const cached = await db_helper.getLinksFromCache(cacheKey);
-      if (cached) {
-        console.log(`[CACHE HIT] Serving sources for ${showId} ep ${episode} from SQLite cache`);
-        return res.json(cached);
-      }
-    } catch (cacheErr) {
-      console.error('[CACHE ERROR] Read failed:', cacheErr.message);
+    if (!result || !result.links || result.links.length === 0) {
+      return res.status(404).json({ error: `No playable stream links found for episode ${episode}.` });
     }
 
-    const api = getApi();
-    console.log(`[STREAM] Fetching sources for ${showId} ep ${episode}`);
-    const { sources, fallback } = await api.getEpisodeEmbedUrls(showId, episode);
-    console.log(`[STREAM] Raw Embed Sources:`, Object.keys(sources));
-    
-    const links = await api.generateLinks(sources);
-    console.log(`[STREAM] Extracted Links:`, links.length);
-    
-    // Filter out duplicates and probe for real resolution if needed
+    const rawLinks = Array.isArray(result.links) ? result.links : (result.links.sources || []);
     const uniqueLinks = [];
     const seenUrls = new Set();
     const linksToProbe = [];
 
-    for (const link of links) {
+    for (const link of rawLinks) {
       if (seenUrls.has(link.url)) continue;
       seenUrls.add(link.url);
       uniqueLinks.push(link);
@@ -229,12 +601,14 @@ app.get('/api/sources/:showId/:episode', async (req, res) => {
       }
     }
 
-    // Probe all in parallel (max 2s wait total)
+    // Probe resolution in parallel (max 2s wait total)
     await Promise.all(linksToProbe.map(async (link) => {
-      const detected = await probeMetadata(link.url);
-      if (detected !== 'unknown') {
-        link.quality = detected;
-      }
+      try {
+        const detected = await probeMetadata(link.url);
+        if (detected !== 'unknown') {
+          link.quality = detected;
+        }
+      } catch (e) {}
     }));
 
     // Sort links by quality (descending)
@@ -246,18 +620,22 @@ app.get('/api/sources/:showId/:episode', async (req, res) => {
 
     const responsePayload = sortedLinks.length === 0
       ? { 
-          sources: [{ url: fallback, quality: 'browser', provider: 'Fallback' }],
-          fallback 
+          sources: [{ url: result.fallback || '', quality: 'browser', provider: 'Fallback' }],
+          fallback: result.fallback || '',
+          referer: result.referer || 'https://megaplay.buzz/'
         }
       : { 
           sources: sortedLinks,
-          fallback
+          fallback: result.fallback || '',
+          referer: result.referer || 'https://megaplay.buzz/'
         };
 
     // Save to cache in the background
-    db_helper.saveLinksToCache(cacheKey, responsePayload)
-      .then(() => console.log(`[CACHE] Saved links for ${showId} ep ${episode}`))
-      .catch(cacheErr => console.error('[CACHE ERROR] Write failed:', cacheErr.message));
+    if (result.cacheKey) {
+      db_helper.saveLinksToCache(result.cacheKey, responsePayload)
+        .then(() => console.log(`[CACHE] Saved links for ${result.cacheKey}`))
+        .catch(cacheErr => console.error('[CACHE ERROR] Write failed:', cacheErr.message));
+    }
 
     res.json(responsePayload);
   } catch (err) {
@@ -265,6 +643,10 @@ app.get('/api/sources/:showId/:episode', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// Global agents for proxy to reuse connections (fixes slow loading)
+const httpsAgent = new (require('https').Agent)({ keepAlive: true, maxSockets: 50 });
+const httpAgent = new (require('http').Agent)({ keepAlive: true, maxSockets: 50 });
 
 // Proxy endpoint to bypass CORS and Referer restrictions
 app.get('/api/proxy', async (req, res) => {
@@ -284,17 +666,24 @@ app.get('/api/proxy', async (req, res) => {
     try {
       const parsedUrl = new URL(url);
       const protocol = parsedUrl.protocol === 'https:' ? https : http;
+      const agent = parsedUrl.protocol === 'https:' ? httpsAgent : httpAgent;
       const api = getApi();
+      const customReferer = req.query.referer || api.referer;
+
+      const headers = {
+        'User-Agent': api.userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+        'Referer': customReferer || new URL(url).origin + '/',
+        'Origin': customReferer ? new URL(customReferer).origin : new URL(url).origin,
+        'Accept': '*/*'
+      };
+      if (req.headers.range) {
+        headers['Range'] = req.headers.range;
+      }
 
       const options = {
-        headers: {
-          'User-Agent': api.userAgent,
-          'Referer': api.referer,
-          'Origin': 'https://allmanga.to',
-          'Accept': '*/*',
-          'Range': req.headers.range || 'bytes=0-',
-        },
-        rejectUnauthorized: false // Handle self-signed or invalid certs from video hosts
+        agent,
+        headers,
+        rejectUnauthorized: false
       };
 
       protocol.get(url, options, (proxyRes) => {
@@ -313,25 +702,66 @@ app.get('/api/proxy', async (req, res) => {
         // Essential CORS for Range requests
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length');
+        // Copy safe headers from proxy
+        const omitHeaders = ['access-control-allow-origin', 'access-control-expose-headers', 'connection', 'host', 'transfer-encoding', 'origin'];
+        for (const [key, value] of Object.entries(proxyRes.headers)) {
+          if (!omitHeaders.includes(key.toLowerCase())) {
+            res.setHeader(key, value);
+          }
+        }
+        const contentType = proxyRes.headers['content-type'] || '';
+        
+        // Force VTT content-type if the url ends with .vtt to satisfy browser strict MIME checking
+        if (url.includes('.vtt')) {
+          res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+        }
+        
+        const isM3u8 = url.includes('.m3u8') || contentType.includes('mpegurl') || contentType.includes('apple.mpegurl');
 
-        if (proxyRes.headers['content-type']) res.setHeader('Content-Type', proxyRes.headers['content-type']);
-        if (proxyRes.headers['content-length']) res.setHeader('Content-Length', proxyRes.headers['content-length']);
-        if (proxyRes.headers['content-range']) res.setHeader('Content-Range', proxyRes.headers['content-range']);
-        if (proxyRes.headers['accept-ranges']) res.setHeader('Accept-Ranges', proxyRes.headers['accept-ranges']);
-
-        // Pipe directly (The Fix for 'Memory Overhead')
-        proxyRes.pipe(res);
+        if (isM3u8) {
+          let body = '';
+          proxyRes.on('data', chunk => body += chunk);
+          proxyRes.on('end', () => {
+            const refererQuery = req.query.referer ? `&referer=${encodeURIComponent(req.query.referer)}` : '';
+            const lines = body.split('\n');
+            const rewritten = lines.map(line => {
+              let trimmed = line.trim();
+              
+              if (trimmed && !trimmed.startsWith('#') && !trimmed.startsWith('http')) {
+                const absoluteUrl = new URL(trimmed, url).href;
+                return `/api/proxy?url=${encodeURIComponent(absoluteUrl)}${refererQuery}`;
+              } else if (trimmed.startsWith('http')) {
+                return `/api/proxy?url=${encodeURIComponent(trimmed)}${refererQuery}`;
+              }
+              
+              if (trimmed.includes('URI="')) {
+                return trimmed.replace(/URI="([^"]+)"/, (match, p1) => {
+                  if (!p1.startsWith('http')) p1 = new URL(p1, url).href;
+                  return `URI="/api/proxy?url=${encodeURIComponent(p1)}${refererQuery}"`;
+                });
+              }
+              
+              return line;
+            }).join('\n');
+            
+            res.setHeader('Content-Length', Buffer.byteLength(rewritten));
+            res.end(rewritten);
+          });
+        } else {
+          // Pipe directly (The Fix for 'Memory Overhead')
+          proxyRes.pipe(res);
+        }
 
         proxyRes.on('error', (err) => {
-          console.error('Proxy stream error:', err.message);
+          console.error(`Proxy stream error for [${url}]:`, err.message);
           res.end();
         });
       }).on('error', (err) => {
-        console.error('Proxy request error:', err.message);
+        console.error(`Proxy request error for [${url}]:`, err.message);
         if (!res.headersSent) res.status(500).send(err.message);
       });
     } catch (err) {
-      console.error('Proxy setup error:', err.message);
+      console.error(`Proxy setup error for [${url}]:`, err.message);
       if (!res.headersSent) res.status(500).send(err.message);
     }
   };
@@ -366,3 +796,7 @@ app.use((req, res, next) => {
 app.listen(PORT, '127.0.0.1', () => {
   console.log(`\x1b[32m✓\x1b[0m Anikage API server running at http://127.0.0.1:${PORT}`);
 });
+
+setInterval(() => {
+  console.log('Event loop still alive');
+}, 5000);

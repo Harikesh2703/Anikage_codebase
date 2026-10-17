@@ -11,16 +11,18 @@ class Downloader {
    */
   async download(videoUrl, filename, options = {}) {
     const { subtitle, referer } = options;
-    const downloadPath = path.join(config.downloadDir, `${helpers.sanitizeFilename(filename)}.mp4`);
+    const isMkv = !!subtitle;
+    const downloadPath = path.join(config.downloadDir, `${helpers.sanitizeFilename(filename)}.${isMkv ? 'mkv' : 'mp4'}`);
     
+    let subtitlePath = null;
     // Download subtitle if provided
     if (subtitle) {
-      await this.downloadSubtitle(subtitle, filename);
+      subtitlePath = await this.downloadSubtitle(subtitle, filename);
     }
     
     // Determine download method based on URL type
     if (videoUrl.includes('m3u8')) {
-      return this.downloadM3U8(videoUrl, downloadPath, referer);
+      return this.downloadM3U8(videoUrl, downloadPath, referer, subtitlePath);
     } else {
       return this.downloadDirect(videoUrl, downloadPath, referer);
     }
@@ -29,7 +31,12 @@ class Downloader {
   /**
    * Download m3u8 stream using yt-dlp or ffmpeg
    */
-  async downloadM3U8(url, outputPath, referer) {
+  async downloadM3U8(url, outputPath, referer, subtitlePath = null) {
+    if (subtitlePath) {
+      console.log('Subtitle provided, skipping yt-dlp and using ffmpeg for stitching...');
+      return this.downloadWithFFmpeg(url, outputPath, referer, subtitlePath);
+    }
+    
     return new Promise((resolve, reject) => {
       // Try yt-dlp first
       const ytdlp = spawn('yt-dlp', [
@@ -46,7 +53,7 @@ class Downloader {
       ytdlp.on('error', (error) => {
         // Fallback to ffmpeg
         console.log('yt-dlp not found, using ffmpeg...');
-        this.downloadWithFFmpeg(url, outputPath, referer)
+        this.downloadWithFFmpeg(url, outputPath, referer, subtitlePath)
           .then(resolve)
           .catch(reject);
         hasError = true;
@@ -76,16 +83,23 @@ class Downloader {
   /**
    * Download with ffmpeg
    */
-  async downloadWithFFmpeg(url, outputPath, referer) {
+  async downloadWithFFmpeg(url, outputPath, referer, subtitlePath = null) {
     return new Promise((resolve, reject) => {
       const args = [
-        '-extension_picky', '0',
         '-loglevel', 'error',
         '-stats',
-        '-i', url,
-        '-c', 'copy',
-        outputPath
+        '-i', url
       ];
+      
+      if (subtitlePath) {
+        args.push('-i', subtitlePath);
+        args.push('-map', '0:v', '-map', '0:a', '-map', '1:s');
+        args.push('-c', 'copy', '-c:s', 'srt');
+      } else {
+        args.push('-c', 'copy');
+      }
+      
+      args.push(outputPath);
       
       if (referer) {
         args.unshift('-referer', referer);
@@ -125,7 +139,7 @@ class Downloader {
       const outputFile = path.basename(outputPath);
       
       const args = [
-        `--referer=${referer || config.allanimeRefr}`,
+        `--referer=${referer || config.hianimeRefr}`,
         '--enable-rpc=false',
         '--check-certificate=false',
         '--continue',
@@ -174,8 +188,10 @@ class Downloader {
       const response = await axios.get(subtitleUrl);
       fs.writeFileSync(subtitlePath, response.data);
       helpers.success(`Subtitle downloaded: ${subtitlePath}`);
+      return subtitlePath;
     } catch (error) {
       console.error(`Failed to download subtitle: ${error.message}`);
+      return null;
     }
   }
 }
