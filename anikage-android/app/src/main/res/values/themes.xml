@@ -3,6 +3,8 @@
     <style name="Theme.Anikage" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">#0A140F</item>
         <item name="android:windowSplashScreenBackground" tools:targetApi="31">#0A140F</item>
+        <item name="android:windowSplashScreenAnimatedIcon" tools:targetApi="31">@drawable/ic_splash_logo</item>
+        <item name="android:windowSplashScreenIconBackgroundColor" tools:targetApi="31">#0A140F</item>
         <item name="android:statusBarColor">#0A140F</item>
         <item name="android:navigationBarColor">#0A140F</item>
     </style>

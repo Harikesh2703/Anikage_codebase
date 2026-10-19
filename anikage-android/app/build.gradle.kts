@@ -1,3 +1,6 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.compose.compiler)
@@ -6,20 +9,38 @@ plugins {
   id("kotlin-kapt")
 }
 
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties()
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+}
+
 android {
-    namespace = "com.example.anikage"
+    namespace = "com.anikage"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.example.anikage"
+        applicationId = "com.anikage"
         minSdk = 24
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("anikage-release.jks")
+            storePassword = keystoreProperties.getProperty("storePassword") ?: "anikage2026release"
+            keyAlias = keystoreProperties.getProperty("keyAlias") ?: "anikage"
+            keyPassword = keystoreProperties.getProperty("keyPassword") ?: "anikage2026release"
+            enableV1Signing = true
+            enableV2Signing = true
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }

@@ -49,5 +49,10 @@ anikage-android/build/
 anikage-android/app/build/
 anikage-android/.android/
 anikage-android/.idea/
-anikage/
+/anikage/
 scrapers_for_upload/
+# Keystore & Kotlin
+*.jks
+*.keystore
+keystore.properties
+anikage-android/.kotlin/
