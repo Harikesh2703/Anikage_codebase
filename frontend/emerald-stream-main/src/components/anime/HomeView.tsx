@@ -3,6 +3,7 @@ import { Loader2 } from 'lucide-react';
 import { AnimeCard } from '@/components/anime/AnimeCard';
 import { AnimeRow } from '@/components/anime/AnimeRow';
 import { HeroSlideshow } from '@/components/anime/HeroSlideshow';
+import { HomeScreenSkeleton } from '@/components/anime/HomeScreenSkeleton';
 import { api } from '@/lib/api';
 import type { AnimeItem } from '@/lib/api';
 
@@ -62,11 +63,7 @@ export function HomeView({ onCardClick, playerOpen }: HomeViewProps) {
   }, [playerOpen]);
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <Loader2 className="w-12 h-12 animate-spin text-primary" />
-      </div>
-    );
+    return <HomeScreenSkeleton />;
   }
 
   if (error) {

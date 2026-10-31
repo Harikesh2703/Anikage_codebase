@@ -5,6 +5,7 @@ import ffmpegStatic from 'ffmpeg-static';
 import { EventEmitter } from 'events';
 import https from 'https';
 import http from 'http';
+import os from 'os';
 import { execSync } from 'child_process';
 
 // Prefer system ffmpeg if available to avoid glibc static build issues, otherwise fallback to ffmpeg-static
@@ -24,11 +25,31 @@ class DownloadManager extends EventEmitter {
     super();
     this.downloads = new Map();
     this.failedDownloads = new Map();
-    this.downloadsDir = path.join(process.cwd(), 'downloads'); // Default to a downloads folder in the app root
+    
+    // Determine downloads directory safely across packaged and dev environments
+    if (process.env.USER_DATA_PATH) {
+      this.downloadsDir = path.join(process.env.USER_DATA_PATH, 'downloads');
+    } else {
+      const userHome = os.homedir();
+      const standardDownloads = path.join(userHome, 'Downloads', 'Anikage');
+      // If run in development inside project root, use ./downloads, otherwise user Downloads
+      this.downloadsDir = (process.cwd() && process.cwd() !== '/' && fs.existsSync(path.join(process.cwd(), 'package.json')))
+        ? path.join(process.cwd(), 'downloads')
+        : standardDownloads;
+    }
     
     // Ensure downloads directory exists
-    if (!fs.existsSync(this.downloadsDir)) {
-      fs.mkdirSync(this.downloadsDir, { recursive: true });
+    try {
+      if (!fs.existsSync(this.downloadsDir)) {
+        fs.mkdirSync(this.downloadsDir, { recursive: true });
+      }
+    } catch (e) {
+      console.error(`[DownloadManager] Failed to create downloads directory ${this.downloadsDir}:`, e.message);
+      // Fallback to /tmp or os.tmpdir() if everything else fails
+      this.downloadsDir = path.join(os.tmpdir(), 'anikage-downloads');
+      if (!fs.existsSync(this.downloadsDir)) {
+        fs.mkdirSync(this.downloadsDir, { recursive: true });
+      }
     }
   }
 

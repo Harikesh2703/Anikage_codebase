@@ -1,4 +1,4 @@
-import { execFile } from 'child_process';
+import { execFile, execSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -31,6 +31,21 @@ export class AniCliRsPlugin {
       if (fs.existsSync(p)) return p;
     }
     return binaryName;
+  }
+
+  isAvailable() {
+    if (path.isAbsolute(this.binaryPath) || this.binaryPath.includes('/') || this.binaryPath.includes('\\')) {
+      return fs.existsSync(this.binaryPath);
+    }
+    // Check in PATH or common directories
+    try {
+      const isWindows = process.platform === 'win32';
+      const cmd = isWindows ? `where ${this.binaryPath}` : `which ${this.binaryPath}`;
+      execSync(cmd, { stdio: 'ignore' });
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 
   execRust(args) {

@@ -7,18 +7,18 @@ class HiAnimeAPI {
         this.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
     }
 
-    execFetch(url, options = {}) {
+    async execFetch(url, options = {}) {
         const headers = {
             'User-Agent': this.userAgent,
             'Accept': 'text/html,application/json,text/plain,*/*',
             ...(options.headers || {})
         };
-        const res = fetch(url, {
+        const res = await fetch(url, {
             method: options.method || 'GET',
             headers,
             body: options.body
         });
-        const text = (res && typeof res.text === 'function') ? res.text() : (typeof res === 'string' ? res : JSON.stringify(res));
+        const text = (res && typeof res.text === 'function') ? await res.text() : (typeof res === 'string' ? res : JSON.stringify(res));
         try {
             return JSON.parse(text);
         } catch (e) {
@@ -26,26 +26,17 @@ class HiAnimeAPI {
         }
     }
 
-    searchAnime(query) {
+    async searchAnime(query) {
         try {
-            const html = this.execFetch(`${this.apiUrl}/search?keyword=${encodeURIComponent(query)}`);
-            if (typeof html !== 'string') return [];
-            const $ = cheerio.load(html);
-            const shows = [];
-            
-            $('div.flw-item').each((_, el) => {
-                const href = $(el).find('a.dynamic-name').attr('href') || "";
-                const id = href.split('?')[0].split('/').filter(Boolean).pop() || "";
-                shows.push({
-                    id: id,
-                    name: $(el).find('a.dynamic-name').text().trim(),
-                    thumbnail: $(el).find('img').attr('data-src') || $(el).find('img').attr('src') || "",
-                    banner: $(el).find('img').attr('data-src') || $(el).find('img').attr('src') || "",
-                    type: "TV",
-                    episodes: 0
-                });
-            });
-            
+            let q = (query || '').trim();
+            let shows = await this._searchRaw(q);
+            if (shows.length === 0 && (q.toLowerCase().includes('season') || q.toLowerCase().includes('part'))) {
+                const cleaned = q.replace(/\s+(?:season|\bpart)\s*\d+/gi, '').replace(/\s+\d+(?:st|nd|rd|th)\s+season/gi, '').trim();
+                if (cleaned && cleaned !== q) {
+                    console.log(`[HiAnime] Retrying search with base title: "${cleaned}"`);
+                    shows = await this._searchRaw(cleaned);
+                }
+            }
             return shows;
         } catch (e) {
             console.error("HiAnime searchAnime failed:", e.message);
@@ -53,9 +44,31 @@ class HiAnimeAPI {
         }
     }
 
-    getTrending() {
+    async _searchRaw(query) {
+        const html = await this.execFetch(`${this.apiUrl}/search?keyword=${encodeURIComponent(query)}`);
+        if (typeof html !== 'string') return [];
+        const $ = cheerio.load(html);
+        const shows = [];
+        
+        $('div.flw-item').each((_, el) => {
+            const href = $(el).find('a.dynamic-name').attr('href') || "";
+            const id = href.split('?')[0].split('/').filter(Boolean).pop() || "";
+            shows.push({
+                id: id,
+                name: $(el).find('a.dynamic-name').text().trim(),
+                thumbnail: $(el).find('img').attr('data-src') || $(el).find('img').attr('src') || "",
+                banner: $(el).find('img').attr('data-src') || $(el).find('img').attr('src') || "",
+                type: "TV",
+                episodes: 0
+            });
+        });
+        
+        return shows;
+    }
+
+    async getTrending() {
         try {
-            const html = this.execFetch(`${this.apiUrl}/home`);
+            const html = await this.execFetch(`${this.apiUrl}/home`);
             if (typeof html !== 'string') return [];
             const $ = cheerio.load(html);
             const shows = [];
@@ -79,10 +92,10 @@ class HiAnimeAPI {
         }
     }
 
-    getEpisodesList(showId) {
+    async getEpisodesList(showId) {
         try {
             const showIdNumeric = showId.split('-').pop();
-            const data = this.execFetch(`${this.apiUrl}/api/theme/episode/list/${showIdNumeric}`, {
+            const data = await this.execFetch(`${this.apiUrl}/api/theme/episode/list/${showIdNumeric}`, {
                 headers: { 'X-Requested-With': 'XMLHttpRequest' }
             });
             const html = data?.html || (typeof data === 'string' ? data : '');
@@ -100,10 +113,10 @@ class HiAnimeAPI {
         }
     }
 
-    getEpisodeEmbedUrls(showId, episodeString) {
+    async getEpisodeEmbedUrls(showId, episodeString) {
         try {
             const showIdNumeric = showId.split('-').pop();
-            const epListData = this.execFetch(`${this.apiUrl}/api/theme/episode/list/${showIdNumeric}`, {
+            const epListData = await this.execFetch(`${this.apiUrl}/api/theme/episode/list/${showIdNumeric}`, {
                 headers: { 'X-Requested-With': 'XMLHttpRequest' }
             });
             const $ep = cheerio.load(epListData?.html || "");
@@ -111,7 +124,7 @@ class HiAnimeAPI {
             
             if (!epId) return { sources: {}, fallback: '' };
 
-            const serverData = this.execFetch(`${this.apiUrl}/api/theme/episode/servers?episodeId=${epId}`, {
+            const serverData = await this.execFetch(`${this.apiUrl}/api/theme/episode/servers?episodeId=${epId}`, {
                 headers: { 'X-Requested-With': 'XMLHttpRequest' }
             });
             const $server = cheerio.load(serverData?.html || "");
@@ -144,12 +157,12 @@ class HiAnimeAPI {
         }
     }
 
-    getVideoLinks(embedUrl, provider) {
+    async getVideoLinks(embedUrl, provider) {
         if (!embedUrl) return [];
-        return this.generateLinks({ [provider || 'HiAnime']: embedUrl });
+        return await this.generateLinks({ [provider || 'HiAnime']: embedUrl });
     }
 
-    generateLinks(sources) {
+    async generateLinks(sources) {
         let s = sources;
         if (typeof s === 'string') {
             try { s = JSON.parse(s); } catch (e) {}
@@ -168,7 +181,7 @@ class HiAnimeAPI {
                     continue;
                 }
 
-                const embedHtml = this.execFetch(refererUrl);
+                const embedHtml = await this.execFetch(refererUrl);
                 if (typeof embedHtml === 'string') {
                     const match = embedHtml.match(/window\.__P="([^"]*)"/);
                     if (match) {

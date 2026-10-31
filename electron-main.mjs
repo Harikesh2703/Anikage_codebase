@@ -14,8 +14,10 @@ let patchServerPath;
 
 // Server path is resolved asynchronously inside startServer()
 
-// Disable GPU hardware acceleration for better compatibility with Wine and integrated graphics
-app.disableHardwareAcceleration();
+// Disable GPU hardware acceleration on Linux for better compatibility with Wine and old Mesa drivers
+if (process.platform === 'linux') {
+  app.disableHardwareAcceleration();
+}
 
 let mainWindow;
 let serverProcess;
@@ -127,6 +129,12 @@ async function startServer() {
 }
 
 function createWindow() {
+  const appIcon = process.platform === 'darwin'
+    ? path.join(__dirname, 'icon.icns')
+    : (fs.existsSync(path.join(__dirname, 'myicon.ico')) 
+        ? path.join(__dirname, 'myicon.ico') 
+        : path.join(__dirname, 'icon.png'));
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -134,7 +142,7 @@ function createWindow() {
     minHeight: 600,
     backgroundColor: '#0c1412',
     title: 'Anikage',
-    icon: path.join(__dirname, 'myicon.ico'), 
+    icon: appIcon, 
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -155,7 +163,7 @@ function createWindow() {
     ? 'http://localhost:8080' 
     : distUiPath;
 
-  const waitForServer = async (retries = 20) => {
+  const waitForServer = async (retries = 40) => {
     writeLog('[Main] Probing backend server on port 3001...');
     for (let i = 0; i < retries; i++) {
       try {
@@ -237,14 +245,18 @@ app.on('ready', () => {
 });
 
 app.on('window-all-closed', () => {
-  if (serverProcess) serverProcess.kill();
-  if (process.platform !== 'darwin') {
-    app.quit();
+  if (serverProcess) {
+    serverProcess.kill();
+    serverProcess = null;
   }
+  app.quit();
 });
 
-app.on('activate', () => {
+app.on('activate', async () => {
   if (mainWindow === null) {
+    if (!serverProcess) {
+      await startServer();
+    }
     createWindow();
   }
 });

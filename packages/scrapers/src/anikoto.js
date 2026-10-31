@@ -11,18 +11,18 @@ export class AnikotoAPI {
     this.cachedParamsTime = 0;
   }
 
-  execFetch(url, options = {}) {
+  async execFetch(url, options = {}) {
     const headers = {
       'User-Agent': this.userAgent,
       'Accept': 'text/html,application/json,text/plain,*/*',
       ...(options.headers || {})
     };
-    const res = fetch(url, {
+    const res = await fetch(url, {
       method: options.method || 'GET',
       headers,
       body: options.body
     });
-    const text = (res && typeof res.text === 'function') ? res.text() : (typeof res === 'string' ? res : JSON.stringify(res));
+    const text = (res && typeof res.text === 'function') ? await res.text() : (typeof res === 'string' ? res : JSON.stringify(res));
     try {
       return JSON.parse(text);
     } catch (e) {
@@ -30,43 +30,17 @@ export class AnikotoAPI {
     }
   }
 
-  searchAnime(query) {
+  async searchAnime(query) {
     try {
-      const q = (!query || query.trim() === '') ? 'top' : query.trim();
-      const url = `${this.baseUrl}/filter?keyword=${encodeURIComponent(q)}`;
-      const html = this.execFetch(url, {
-        headers: { 'X-Requested-With': 'XMLHttpRequest' }
-      });
-      if (typeof html !== 'string') return [];
-
-      const $ = cheerio.load(html);
-      const shows = [];
-      const seen = new Set();
-
-      $('a[href*="/watch/"]').each((_, el) => {
-        const href = $(el).attr('href') || '';
-        const m = href.match(/\/watch\/([^\/?#]+)/);
-        if (!m) return;
-        const slug = m[1];
-        if (seen.has(slug)) return;
-        seen.add(slug);
-
-        const card = $(el).closest('.item, .film-item, .flw-item') || $(el);
-        const title = card.find('.name, .d-title, .film-name').text().trim() || slug.replace(/-/g, ' ');
-        const poster = card.find('img').attr('src') || card.find('img').attr('data-src') || '';
-        const epsText = card.find('.ep-status, .tick-eps, .tick-sub').text().trim();
-        const epsCount = parseInt(epsText.replace(/\D/g, ''), 10) || 0;
-
-        shows.push({
-          id: `anikoto:${slug}`,
-          name: title,
-          thumbnail: poster,
-          banner: poster,
-          type: 'TV',
-          episodes: epsCount
-        });
-      });
-
+      let q = (!query || query.trim() === '') ? 'top' : query.trim();
+      let shows = await this._searchRaw(q);
+      if (shows.length === 0 && (q.toLowerCase().includes('season') || q.toLowerCase().includes('part'))) {
+        const cleaned = q.replace(/\s+(?:season|\bpart)\s*\d+/gi, '').replace(/\s+\d+(?:st|nd|rd|th)\s+season/gi, '').trim();
+        if (cleaned && cleaned !== q) {
+          console.log(`[Anikoto] Retrying search with base title: "${cleaned}"`);
+          shows = await this._searchRaw(cleaned);
+        }
+      }
       return shows;
     } catch (err) {
       console.error('[Anikoto] searchAnime error:', err.message);
@@ -74,8 +48,46 @@ export class AnikotoAPI {
     }
   }
 
-  getTrending() {
-    return this.searchAnime('top');
+  async _searchRaw(q) {
+    const url = `${this.baseUrl}/filter?keyword=${encodeURIComponent(q)}`;
+    const html = await this.execFetch(url, {
+      headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    });
+    if (typeof html !== 'string') return [];
+
+    const $ = cheerio.load(html);
+    const shows = [];
+    const seen = new Set();
+
+    $('a[href*="/watch/"]').each((_, el) => {
+      const href = $(el).attr('href') || '';
+      const m = href.match(/\/watch\/([^\/?#]+)/);
+      if (!m) return;
+      const slug = m[1];
+      if (seen.has(slug)) return;
+      seen.add(slug);
+
+      const card = $(el).closest('.item, .film-item, .flw-item') || $(el);
+      const title = card.find('.name, .d-title, .film-name').text().trim() || slug.replace(/-/g, ' ');
+      const poster = card.find('img').attr('src') || card.find('img').attr('data-src') || '';
+      const epsText = card.find('.ep-status, .tick-eps, .tick-sub').text().trim();
+      const epsCount = parseInt(epsText.replace(/\D/g, ''), 10) || 0;
+
+      shows.push({
+        id: `anikoto:${slug}`,
+        name: title,
+        thumbnail: poster,
+        banner: poster,
+        type: 'TV',
+        episodes: epsCount
+      });
+    });
+
+    return shows;
+  }
+
+  async getTrending() {
+    return await this.searchAnime('top');
   }
 
   extractSlug(showId) {
@@ -96,20 +108,20 @@ export class AnikotoAPI {
     return clean;
   }
 
-  getEpisodesList(showId) {
+  async getEpisodesList(showId) {
     try {
       const slug = this.extractSlug(showId);
       if (!slug) return [];
 
       // 1. Fetch watch page to get show ID
-      const watchHtml = this.execFetch(`${this.baseUrl}/watch/${slug}`);
+      const watchHtml = await this.execFetch(`${this.baseUrl}/watch/${slug}`);
       if (typeof watchHtml !== 'string') return [];
       const $w = cheerio.load(watchHtml);
       const dataId = $w('#watch-main').attr('data-id');
       if (!dataId) return [];
 
       // 2. Fetch episodes list ajax
-      const epData = this.execFetch(`${this.baseUrl}/ajax/episode/list/${dataId}`, {
+      const epData = await this.execFetch(`${this.baseUrl}/ajax/episode/list/${dataId}`, {
         headers: {
           'X-Requested-With': 'XMLHttpRequest',
           'Referer': `${this.baseUrl}/watch/${slug}`
@@ -134,17 +146,17 @@ export class AnikotoAPI {
     }
   }
 
-  getEpisodeEmbedUrls(showId, episodeString) {
+  async getEpisodeEmbedUrls(showId, episodeString) {
     try {
       const slug = this.extractSlug(showId);
       if (!slug) return { sources: {}, fallback: '' };
 
-      const watchHtml = this.execFetch(`${this.baseUrl}/watch/${slug}`);
+      const watchHtml = await this.execFetch(`${this.baseUrl}/watch/${slug}`);
       const $w = cheerio.load(watchHtml);
       const dataId = $w('#watch-main').attr('data-id');
       if (!dataId) return { sources: {}, fallback: '' };
 
-      const epData = this.execFetch(`${this.baseUrl}/ajax/episode/list/${dataId}`, {
+      const epData = await this.execFetch(`${this.baseUrl}/ajax/episode/list/${dataId}`, {
         headers: {
           'X-Requested-With': 'XMLHttpRequest',
           'Referer': `${this.baseUrl}/watch/${slug}`
@@ -164,7 +176,7 @@ export class AnikotoAPI {
       if (!epToken) return { sources: {}, fallback: '' };
 
       // Get server list
-      const srvData = this.execFetch(`${this.baseUrl}/ajax/server/list?servers=${encodeURIComponent(epToken)}`, {
+      const srvData = await this.execFetch(`${this.baseUrl}/ajax/server/list?servers=${encodeURIComponent(epToken)}`, {
         headers: {
           'X-Requested-With': 'XMLHttpRequest',
           'Referer': `${this.baseUrl}/watch/${slug}`
@@ -183,7 +195,7 @@ export class AnikotoAPI {
         const linkId = $s(el).attr('data-link-id');
         if (!linkId) continue;
 
-        const embedRes = this.execFetch(`${this.baseUrl}/ajax/server?get=${encodeURIComponent(linkId)}`, {
+        const embedRes = await this.execFetch(`${this.baseUrl}/ajax/server?get=${encodeURIComponent(linkId)}`, {
           headers: {
             'X-Requested-With': 'XMLHttpRequest',
             'Referer': `${this.baseUrl}/watch/${slug}`
@@ -203,11 +215,11 @@ export class AnikotoAPI {
     }
   }
 
-  getCryptoParams() {
+  async getCryptoParams() {
     if (this.cachedParams && (Date.now() - this.cachedParamsTime < 300000)) {
       return this.cachedParams;
     }
-    const scriptText = this.execFetch('https://megaplay.buzz/videojs/lib/e1-player.min.js?v=3.19');
+    const scriptText = await this.execFetch('https://megaplay.buzz/videojs/lib/e1-player.min.js?v=3.19');
     if (typeof scriptText !== 'string') return null;
 
     const re = /\bconst\s+[\w$]+="((?:\\.|[^"\\])*)",[\w$]+="((?:\\.|[^"\\])*)",[\w$]+="((?:\\.|[^"\\])*)",[\w$]+=(\d+);function\s+[\w$]+\(/g;
@@ -228,12 +240,12 @@ export class AnikotoAPI {
     return null;
   }
 
-  getVideoLinks(providerId, providerName) {
+  async getVideoLinks(providerId, providerName) {
     try {
       const embedUrl = providerId;
       if (!embedUrl || !embedUrl.startsWith('http')) return [];
 
-      const embedHtml = this.execFetch(embedUrl, {
+      const embedHtml = await this.execFetch(embedUrl, {
         headers: { 'Referer': 'https://anikoto.cz/' }
       });
       if (typeof embedHtml !== 'string') return [];
@@ -242,7 +254,7 @@ export class AnikotoAPI {
       if (!dataIdMatch) return [];
       const dataId = dataIdMatch[1];
 
-      const sourcesData = this.execFetch(`https://megaplay.buzz/stream/getSources?id=${dataId}`, {
+      const sourcesData = await this.execFetch(`https://megaplay.buzz/stream/getSources?id=${dataId}`, {
         headers: {
           'Referer': embedUrl,
           'Origin': 'https://megaplay.buzz'
@@ -251,7 +263,7 @@ export class AnikotoAPI {
 
       if (!sourcesData || !sourcesData.enc) return [];
 
-      const params = this.getCryptoParams();
+      const params = await this.getCryptoParams();
       if (!params) return [];
 
       const key = CryptoJS.enc.Utf8.parse(params.key.padEnd(32, '\0'));
@@ -306,7 +318,7 @@ export class AnikotoAPI {
     }
   }
 
-  generateLinks(sources) {
+  async generateLinks(sources) {
     try {
       let s = sources;
       if (typeof s === 'string') {
@@ -315,7 +327,7 @@ export class AnikotoAPI {
       const entries = Object.entries(s || {});
       if (entries.length === 0) return [];
       const [providerName, embedUrl] = entries[0];
-      return this.getVideoLinks(embedUrl, providerName);
+      return await this.getVideoLinks(embedUrl, providerName);
     } catch (e) {
       console.error('[Anikoto] generateLinks error:', e.message);
       return [];

@@ -13,8 +13,9 @@
     "build:frontend": "cd frontend/emerald-stream-main && npm run build",
     "build:rust": "cd rust-scraper && cargo build --release || echo 'Failed to build Rust binary, falling back'",
     "postinstall": "npm run build:rust",
-    "desktop": "concurrently \"npm run frontend\" \"electron . --no-sandbox\"",
+    "desktop": "concurrently \"npm run frontend\" \"npx electron .\"",
     "dist": "npm run build:rust && electron-builder",
+    "dist:mac": "npm run build:frontend && electron-builder --mac --x64",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
@@ -62,6 +63,7 @@
     "asarUnpack": [
       "server/**/*",
       "src/**/*",
+      "packages/scrapers/dist/**/*",
       "node_modules/**/*",
       "rust-scraper/target/release/ani-cli-rs",
       "rust-scraper/target/release/ani-cli-rs.exe"
@@ -75,6 +77,41 @@
     ],
     "directories": {
       "output": "dist_electron"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "icon.icns",
+      "category": "public.app-category.entertainment",
+      "artifactName": "Anikage-${version}-mac-x64.${ext}",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
+    },
+    "dmg": {
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
     },
     "linux": {
       "target": [

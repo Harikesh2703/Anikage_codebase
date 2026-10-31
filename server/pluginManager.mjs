@@ -96,11 +96,25 @@ class PluginManager {
         try {
           const files = fs.readdirSync(dir);
           for (const file of files) {
-            if (file.endsWith('.js') && file !== 'anikoto.js' && file !== 'allanime.js' && file !== 'anikoto_cz.js') {
+            if (file.endsWith('.js') && file !== 'allanime.js' && file !== 'anikoto_cz.js') {
+              if (file === 'anikoto.js' && this.plugins.has('anikoto') && this.plugins.get('anikoto').isNative) {
+                continue;
+              }
+              const src = path.join(dir, file);
               const dest = path.join(this.pluginsPath, file);
-              if (!fs.existsSync(dest)) {
-                fs.copyFileSync(path.join(dir, file), dest);
-                console.log(`[PluginManager] Seeded bundled plugin: ${file}`);
+              let shouldCopy = !fs.existsSync(dest);
+              if (!shouldCopy) {
+                try {
+                  const srcStat = fs.statSync(src);
+                  const destStat = fs.statSync(dest);
+                  if (srcStat.mtimeMs > destStat.mtimeMs || srcStat.size !== destStat.size) {
+                    shouldCopy = true;
+                  }
+                } catch (e) {}
+              }
+              if (shouldCopy) {
+                fs.copyFileSync(src, dest);
+                console.log(`[PluginManager] Seeded/updated bundled plugin: ${file}`);
               }
             }
           }
@@ -113,6 +127,10 @@ class PluginManager {
 
   registerNativePlugins() {
     try {
+      if (typeof aniCliRsPlugin.isAvailable === 'function' && !aniCliRsPlugin.isAvailable()) {
+        console.log('[PluginManager] ani-cli-rs binary not available on this platform. Using bundled JavaScript scrapers.');
+        return;
+      }
       this.plugins.set('anikoto', {
         id: 'anikoto',
         name: aniCliRsPlugin.name,
@@ -196,8 +214,8 @@ class PluginManager {
 
   loadPlugin(filePath) {
     const id = path.basename(filePath, '.js');
-    if (id === 'anikoto') {
-      // Reserved for native ani-cli-rs plugin
+    if (id === 'anikoto' && this.plugins.has('anikoto') && this.plugins.get('anikoto').isNative) {
+      // Native ani-cli-rs takes precedence if available
       return;
     }
     if (id === 'allanime' || id === 'anikoto_cz') {

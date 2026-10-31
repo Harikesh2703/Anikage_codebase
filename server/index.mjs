@@ -365,22 +365,30 @@ async function resolveAnimeEpisodes(showId, titleHint = '') {
 
   // 2. Search across providers by title
   if (title) {
-    for (const pId of providersToTry) {
-      const p = pluginManager.plugins.get(pId);
-      if (!p) continue;
-      try {
-        console.log(`[Episodes] Searching provider ${pId} for "${title}"`);
-        const searchResults = await p.instance.searchAnime(title);
-        if (searchResults && searchResults.length > 0) {
-          const match = searchResults[0];
-          const eps = await p.instance.getEpisodesList(match.id);
-          if (eps && eps.length > 0) {
-            console.log(`[Episodes] Provider ${pId} returned ${eps.length} episodes for "${title}" (ID: ${match.id})`);
-            return { episodes: eps, provider: pId, showId: match.id, title };
+    const titlesToTry = [title];
+    const baseTitle = title.replace(/\s+(?:season|\bpart)\s*\d+/gi, '').replace(/\s+\d+(?:st|nd|rd|th)\s+season/gi, '').trim();
+    if (baseTitle && baseTitle.toLowerCase() !== title.toLowerCase()) {
+      titlesToTry.push(baseTitle);
+    }
+
+    for (const searchTitle of titlesToTry) {
+      for (const pId of providersToTry) {
+        const p = pluginManager.plugins.get(pId);
+        if (!p) continue;
+        try {
+          console.log(`[Episodes] Searching provider ${pId} for "${searchTitle}"`);
+          const searchResults = await p.instance.searchAnime(searchTitle);
+          if (searchResults && searchResults.length > 0) {
+            const match = searchResults[0];
+            const eps = await p.instance.getEpisodesList(match.id);
+            if (eps && eps.length > 0) {
+              console.log(`[Episodes] Provider ${pId} returned ${eps.length} episodes for "${searchTitle}" (ID: ${match.id})`);
+              return { episodes: eps, provider: pId, showId: match.id, title: searchTitle };
+            }
           }
+        } catch (err) {
+          console.warn(`[Episodes] Search on ${pId} for "${searchTitle}" failed: ${err.message}`);
         }
-      } catch (err) {
-        console.warn(`[Episodes] Search on ${pId} for "${title}" failed: ${err.message}`);
       }
     }
   }
@@ -475,36 +483,44 @@ async function resolveStreamSources(showId, episode, titleHint = '') {
 
   // 2. Search fallback providers if direct failed or was catalog ID
   if (title) {
-    for (const pId of providersToTry) {
-      if (pId === targetPluginId) continue;
-      const p = pluginManager.plugins.get(pId);
-      if (!p) continue;
+    const titlesToTry = [title];
+    const baseTitle = title.replace(/\s+(?:season|\bpart)\s*\d+/gi, '').replace(/\s+\d+(?:st|nd|rd|th)\s+season/gi, '').trim();
+    if (baseTitle && baseTitle.toLowerCase() !== title.toLowerCase()) {
+      titlesToTry.push(baseTitle);
+    }
 
-      try {
-        console.log(`[STREAM] Fallback searching ${pId} for "${title}"`);
-        const found = await p.instance.searchAnime(title);
-        if (found && found.length > 0) {
-          const match = found[0];
-          const matchedId = match.id.includes(':')
-            ? match.id.split(':').slice(1).join(':')
-            : match.id;
-          const cacheKey = `${pId}:${matchedId}:${episode}`;
-          try {
-            const cached = await db_helper.getLinksFromCache(cacheKey);
-            if (cached) {
-              if (cached.referer) p.instance.referer = cached.referer;
-              return { links: cached.sources || cached, fallback: cached.fallback || '', provider: pId };
+    for (const searchTitle of titlesToTry) {
+      for (const pId of providersToTry) {
+        if (pId === targetPluginId) continue;
+        const p = pluginManager.plugins.get(pId);
+        if (!p) continue;
+
+        try {
+          console.log(`[STREAM] Fallback searching ${pId} for "${searchTitle}"`);
+          const found = await p.instance.searchAnime(searchTitle);
+          if (found && found.length > 0) {
+            const match = found[0];
+            const matchedId = match.id.includes(':')
+              ? match.id.split(':').slice(1).join(':')
+              : match.id;
+            const cacheKey = `${pId}:${matchedId}:${episode}`;
+            try {
+              const cached = await db_helper.getLinksFromCache(cacheKey);
+              if (cached) {
+                if (cached.referer) p.instance.referer = cached.referer;
+                return { links: cached.sources || cached, fallback: cached.fallback || '', provider: pId };
+              }
+            } catch (e) {}
+
+            const { sources, fallback } = await p.instance.getEpisodeEmbedUrls(match.id, episode);
+            const links = await p.instance.generateLinks(sources);
+            if (links && links.length > 0) {
+              return { links, fallback, provider: pId, cacheKey };
             }
-          } catch (e) {}
-
-          const { sources, fallback } = await p.instance.getEpisodeEmbedUrls(match.id, episode);
-          const links = await p.instance.generateLinks(sources);
-          if (links && links.length > 0) {
-            return { links, fallback, provider: pId, cacheKey };
           }
+        } catch (err) {
+          console.warn(`[STREAM] Fallback on ${pId} for "${searchTitle}" failed: ${err.message}`);
         }
-      } catch (err) {
-        console.warn(`[STREAM] Fallback on ${pId} for "${title}" failed: ${err.message}`);
       }
     }
   }
